@@ -1,8 +1,5 @@
 .DS_Store
 node_modules/
 
-# Probe output (temporary test fixtures)
-docs/payloads/
-
 # Temporary files
 *.tmp

@@ -1,16 +1,16 @@
 {
   "hooks": {
     "SessionStart": [
-      { "hooks": [ { "type": "command", "command": "sh ${CLAUDE_PLUGIN_ROOT}/scripts/probe.sh", "async": true, "timeout": 10 } ] }
+      { "hooks": [ { "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/probe.sh\"", "async": true, "timeout": 10 } ] }
     ],
     "PostToolUse": [
-      { "matcher": "Edit|Write|NotebookEdit", "hooks": [ { "type": "command", "command": "sh ${CLAUDE_PLUGIN_ROOT}/scripts/probe.sh", "async": true, "timeout": 10 } ] }
+      { "matcher": "Edit|Write|NotebookEdit", "hooks": [ { "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/probe.sh\"", "async": true, "timeout": 10 } ] }
     ],
     "SubagentStop": [
-      { "hooks": [ { "type": "command", "command": "sh ${CLAUDE_PLUGIN_ROOT}/scripts/probe.sh", "async": true, "timeout": 10 } ] }
+      { "hooks": [ { "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/probe.sh\"", "async": true, "timeout": 10 } ] }
     ],
     "Stop": [
-      { "hooks": [ { "type": "command", "command": "sh ${CLAUDE_PLUGIN_ROOT}/scripts/probe.sh", "async": true, "timeout": 10 } ] }
+      { "hooks": [ { "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/probe.sh\"", "async": true, "timeout": 10 } ] }
     ]
   }
 }
