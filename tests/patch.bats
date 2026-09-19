@@ -49,7 +49,18 @@ build() { sh -c '. "$1/scripts/patch.sh"; hhr_build_patch "$2"' _ "$HHR_ROOT" "$
   git -C "$REPO" add .gitignore && git -C "$REPO" commit -qm ignore
   printf 'secret\n' > "$REPO/ignored.txt"
   build
-  ! grep -q 'ignored.txt' "$DIR/combined.patch"
+  # Assert on the ignored file's own diff path and content. A bare `grep ignored.txt`
+  # would match the .gitignore's committed CONTENT — that commit is legitimate session
+  # work and belongs in the patch, so the bare grep tests the wrong thing.
+  # (`run` + status check, not `! grep`, because in bash a `!`-negated command is exempt
+  # from errexit/bats failure detection unless it happens to be the test's last statement
+  # — a non-final `! grep` here would silently pass even when the grep matches.)
+  run grep -q 'b/repoA/ignored.txt' "$DIR/combined.patch"
+  [ "$status" -ne 0 ]
+  run grep -q '^+secret' "$DIR/combined.patch"
+  [ "$status" -ne 0 ]
+  # The .gitignore commit itself is session work and must still appear.
+  grep -q 'b/repoA/.gitignore' "$DIR/combined.patch"
 }
 
 @test "includes a deletion" {
