@@ -1,8 +1,8 @@
 # herdr-hunk-review
 
-A Claude Code plugin. Standalone repo — the surrounding workspace conventions
-(branch naming, dev/release/stage promotion, required reviewers) do NOT apply here.
-Work on `main`.
+A Claude Code plugin, developed in its own standalone repository. Conventions from any
+surrounding workspace (branch naming, promotion chains, required reviewers) do NOT apply
+here. Work on `main`.
 
 ## Versioning
 
