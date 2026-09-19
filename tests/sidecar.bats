@@ -31,6 +31,40 @@ build() { sh -c '. "$1/scripts/sidecar.sh"; hhr_build_sidecar "$2"' _ "$HHR_ROOT
   jq -e '.files[0].annotations[0].summary | test("Made the dep required")' "$DIR/agent-context.json"
 }
 
+@test "anchors a replace-one-line hunk on the new line, not the old one" {
+  # The dominant Edit shape ("-old" then "+new" in the same hunk) must anchor on the
+  # NEW-side line. Confirmed against the unfixed hhr_patch_anchors: it stops at the
+  # first changed line regardless of side, so a "-" arriving before the matching "+"
+  # wins and this produces oldRange instead - this test fails against that behavior.
+  cat > "$DIR/combined.patch" <<'EOF'
+diff --git a/repoA/tracked.txt b/repoA/tracked.txt
+index 111..222 100644
+--- a/repoA/tracked.txt
++++ b/repoA/tracked.txt
+@@ -1,2 +1,2 @@
+-line1
++line1 replaced
+ line2
+EOF
+  write_state "$(jq -nc --arg f "/x/repoA/tracked.txt" \
+    '{repos:{"/x/repoA":{baseline:"b",prefix:"repoA"}},
+      agents:{a1:{type:"impl",output:"replaced the line",files:[$f]}}}')"
+  build
+  jq -e '.files[0].annotations[0].newRange' "$DIR/agent-context.json"
+  [ "$(jq -r '.files[0].annotations[0].newRange[0]' "$DIR/agent-context.json")" -eq 1 ]
+}
+
+@test "an agent with no report text produces no annotation" {
+  # track.sh seeds {type:"", output:""} for a main-agent record note.sh never touches.
+  # jq's `//` only defaults null/false, not "", so the old code emitted a real but
+  # empty "[] no report" annotation on every file such an agent touched.
+  write_state "$(jq -nc --arg f "/x/repoA/tracked.txt" \
+    '{repos:{"/x/repoA":{baseline:"b",prefix:"repoA"}},
+      agents:{main:{type:"",output:"",files:[$f]}}}')"
+  build
+  [ "$(jq -r '.files | length' "$DIR/agent-context.json")" -eq 0 ]
+}
+
 @test "is valid JSON with version 1 and a changeset summary" {
   write_state "$(jq -nc '{repos:{},agents:{}}')"
   build

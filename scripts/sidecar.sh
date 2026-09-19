@@ -1,22 +1,32 @@
 # Sourced. Builds <state_dir>/agent-context.json from state.json and combined.patch.
 HHR_NOTE_MAX_CHARS=300
 
-# Prints "<prefixed-path>\t<side>\t<line>" for every file in the patch,
-# where side is "new" or "old" and line is the first changed line on that side.
+# Prints "<prefixed-path>\t<side>\t<line>" for every file in the patch. The anchor
+# prefers the first ADDED line (the common replace-one-line shape is "-old" then
+# "+new", and the spec wants the new-side line); it falls back to the first REMOVED
+# line only when the file has no additions at all (a pure deletion).
 hhr_patch_anchors() {
   awk '
+    function flush(p) {
+      if (p == "" || (p in done)) return
+      if (p in hasAdd) print p "\tnew\t" firstAdd[p]
+      else if (p in hasDel) print p "\told\t" firstDel[p]
+      done[p] = 1
+    }
     # A new file section resets hunk state, so header lines are only ever read
     # outside a hunk. Inside one, a deleted "-- foo" renders as "--- foo" and must
     # not be mistaken for a header.
-    /^diff --git / { inhunk = 0; next }
+    /^diff --git / { flush(curpath); curpath = ""; newpath = ""; oldpath = ""; inhunk = 0; next }
     !inhunk && /^\+\+\+ / {
       p = substr($0, 5)
       if (p == "/dev/null") { newpath = "" } else { sub(/^b\//, "", p); newpath = p }
+      curpath = (newpath != "" ? newpath : oldpath)
       next
     }
     !inhunk && /^--- / {
       p = substr($0, 5)
       if (p == "/dev/null") { oldpath = "" } else { sub(/^a\//, "", p); oldpath = p }
+      curpath = (newpath != "" ? newpath : oldpath)
       next
     }
     /^@@ / {
@@ -28,18 +38,17 @@ hhr_patch_anchors() {
       next
     }
     inhunk && /^\+/ {
-      path = (newpath != "" ? newpath : oldpath)
-      if (path != "" && !(path in done)) { print path "\tnew\t" newline; done[path] = 1; inhunk = 0 }
+      if (curpath != "" && !(curpath in hasAdd)) { hasAdd[curpath] = 1; firstAdd[curpath] = newline }
       newline++
       next
     }
     inhunk && /^-/ {
-      path = (oldpath != "" ? oldpath : newpath)
-      if (path != "" && !(path in done)) { print path "\told\t" oldline; done[path] = 1; inhunk = 0 }
+      if (curpath != "" && !(curpath in hasDel)) { hasDel[curpath] = 1; firstDel[curpath] = oldline }
       oldline++
       next
     }
     inhunk && /^ / { oldline++; newline++; next }
+    END { flush(curpath) }
   ' "$1"
 }
 
@@ -64,6 +73,10 @@ hhr_build_sidecar() {
     [.repos | to_entries[] | {root: .key, prefix: .value.prefix}] as $repos
     | .agents | to_entries[]
     | . as $a
+    # A main-agent record that neither track.sh nor note.sh ever filled in beyond the
+    # seeded placeholder (type "" and output "") has no report at all - skip it rather
+    # than emit an empty "[] no report" annotation on every file it touched.
+    | select((($a.value.type // "") != "") or (($a.value.output // "") != ""))
     | ($a.value.files // [])[]
     | . as $f
     | ($repos[] | . as $rr | select($f | startswith($rr.root + "/")) | $rr) as $r
