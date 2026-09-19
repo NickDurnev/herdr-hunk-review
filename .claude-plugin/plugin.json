@@ -1,0 +1,6 @@
+{
+  "name": "herdr-hunk-review",
+  "description": "Keeps a live hunk pane showing every change this Claude session made, across every repo, refreshed when any agent or subagent finishes.",
+  "version": "0.1.0",
+  "license": "MIT"
+}

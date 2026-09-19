@@ -1,0 +1,15 @@
+{
+  "name": "nick-local",
+  "owner": {
+    "name": "Nick"
+  },
+  "description": "Local plugins",
+  "plugins": [
+    {
+      "name": "herdr-hunk-review",
+      "source": "./",
+      "description": "Live session diff pane via herdr + hunk",
+      "version": "0.1.0"
+    }
+  ]
+}
