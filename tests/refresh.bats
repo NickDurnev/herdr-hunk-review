@@ -54,10 +54,12 @@ teardown() { teardown_scratch; }
 @test "marks watch_stalled when the session snapshot lags the patch" {
   # A session that reports an ancient updatedAt must trigger the fallback exactly once.
   STUB="$SCRATCH/bin"; mkdir -p "$STUB"; export PATH="$STUB:$PATH"
+  # cwd is deliberately NOT $DIR: the pane's cwd is now the project directory (see
+  # hhr_pane_ensure), so the session lookup must match on sourceLabel instead.
   cat > "$STUB/hunk" <<EOF
 #!/bin/sh
 [ "\$1 \$2" = "session list" ] && cat <<'JSON'
-{"sessions":[{"sessionId":"sid1","cwd":"$DIR","snapshot":{"updatedAt":"2000-01-01T00:00:00.000Z"}}]}
+{"sessions":[{"sessionId":"sid1","cwd":"/private/tmp/elsewhere","sourceLabel":"$DIR/combined.patch","snapshot":{"updatedAt":"2000-01-01T00:00:00.000Z"}}]}
 JSON
 exit 0
 EOF

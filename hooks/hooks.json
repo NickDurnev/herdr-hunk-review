@@ -14,6 +14,9 @@
     ],
     "Stop": [
       { "hooks": [ { "type": "command", "command": "sh -c 'sh \"${CLAUDE_PLUGIN_ROOT}/scripts/refresh.sh\" \"$(jq -r .session_id)\"'", "async": true, "timeout": 60 } ] }
+    ],
+    "SessionEnd": [
+      { "hooks": [ { "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/cleanup.sh\"", "timeout": 5 } ] }
     ]
   }
 }

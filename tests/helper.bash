@@ -35,3 +35,8 @@ subagent_stop_payload() {
     '{session_id:$s, agent_id:$a, agent_type:$t, agent_output:$o,
       hook_event_name:"SubagentStop"}'
 }
+
+# Emits a SessionEnd payload: session_id
+session_end_payload() {
+  jq -nc --arg s "$1" '{session_id:$s, hook_event_name:"SessionEnd"}'
+}

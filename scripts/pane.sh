@@ -17,6 +17,13 @@ hhr_pane_ensure() {
   [ -s "$dir/combined.patch" ] || return 0
 
   if [ -f "$dir/pane" ] && hhr_pane_alive "$(cat "$dir/pane")"; then
+    # A pane can exist but be an empty shell if the hunk process inside it already
+    # exited (crash, `q`, `hunk session` reaped). A live patch session is the signal
+    # the viewer is actually running, so check that before trusting the pane.
+    if [ -n "$(hhr_session_id "$dir")" ]; then
+      return 0
+    fi
+    hhr_pane_restart "$dir"
     return 0
   fi
 
@@ -25,7 +32,12 @@ hhr_pane_ensure() {
   h=$(herdr pane layout --current 2>/dev/null | jq -r '.result.layout.area.height // 40')
   if [ "$w" -gt $((h * 3)) ] 2>/dev/null; then direction=right; else direction=down; fi
 
-  pane=$(herdr pane split --current --direction "$direction" --cwd "$dir" --no-focus 2>/dev/null \
+  # Split with the PROJECT directory, never the per-session state dir: state dirs are
+  # cleaned up independently of pane lifetime, and a pane whose cwd is later deleted
+  # becomes a permanently broken shell ("the current working directory was deleted").
+  # hhr_viewer_cmd only ever emits absolute paths, so the pane's cwd doesn't matter
+  # to the command it runs.
+  pane=$(herdr pane split --current --direction "$direction" --cwd "$PWD" --no-focus 2>/dev/null \
          | jq -r '.result.pane.pane_id // empty')
   [ -n "$pane" ] || return 0
   printf '%s' "$pane" > "$dir/pane"
@@ -45,7 +57,10 @@ hhr_pane_restart() {
 }
 
 hhr_session_id() {
+  # Match on sourceLabel, not cwd: cwd is the pane's cwd (now the project dir, not
+  # this state dir - see hhr_pane_ensure), but sourceLabel is the patch path exactly
+  # as passed on the command line, which hhr_viewer_cmd builds from this same $1.
   command -v hunk >/dev/null 2>&1 || return 0
   hunk session list --json 2>/dev/null \
-    | jq -r --arg d "$1" '.sessions[] | select(.cwd == $d) | .sessionId' 2>/dev/null | head -1
+    | jq -r --arg l "$1/combined.patch" '.sessions[] | select(.sourceLabel == $l) | .sessionId' 2>/dev/null | head -1
 }
