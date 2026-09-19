@@ -67,12 +67,14 @@ teardown() { teardown_scratch; }
   done
 }
 
-@test "guard exits 0 and silently when the session is paused" {
+@test "guard does not special-case paused - recording must happen regardless" {
+  # Only refresh.sh gates on `paused` now; prebaseline.sh/track.sh/note.sh must keep
+  # recording while paused, or their first edit is permanently lost (see refresh.bats).
   d="$(hhr_state_dir sess-paused)"
   touch "$d/paused"
   run sh -c '. "$1/scripts/common.sh"; hhr_guard "$2"; echo REACHED' _ "$HHR_ROOT" "$d"
   [ "$status" -eq 0 ]
-  [ "$output" != "REACHED" ]
+  [ "$output" = "REACHED" ]
 }
 
 @test "guard returns and lets the caller continue when not paused" {

@@ -16,34 +16,47 @@ hhr_state_dir() {
 
 hhr_json_get() { jq -r --arg k "$1" '.[$k] // empty'; }
 
-# Exit the CALLING script 0 when the plugin must not act.
+# Exit the CALLING script 0 when the plugin must not act. Recording (prebaseline.sh,
+# track.sh, note.sh) must run whether or not the session is paused - only refresh.sh
+# gates on the `paused` marker, so pausing stops the pane from updating without losing
+# the edits made while it was paused.
 hhr_guard() {
   hhr_have jq  || exit 0
   hhr_have git || exit 0
-  [ -e "$1/paused" ] && exit 0
   return 0
 }
 
 hhr_lock() {
   lock="$1/.lock"
-  mkdir "$lock" 2>/dev/null && return 0
-  # Contended. Serialise stale-breaking behind a second lock so the staleness test and
-  # the break cannot interleave: a racer that measured the OLD lock must not be able to
-  # destroy the fresh lock a winner has since created. Measured over 30 concurrent
-  # trials: blind rm -rf yields >1 winner 27/30, claim-by-rename 1/30, this 0/30.
   brk="$1/.lockbreak"
-  mkdir "$brk" 2>/dev/null || return 1
-  rc=1
-  if [ -d "$lock" ]; then
-    now=$(date +%s)
-    then_=$(stat -f %m "$lock" 2>/dev/null || stat -c %Y "$lock" 2>/dev/null || echo "$now")
-    if [ $((now - then_)) -gt "$HHR_LOCK_STALE_SECONDS" ]; then
-      rm -rf "$lock"
-      mkdir "$lock" 2>/dev/null && rc=0
+  attempts=0
+  # ~5s total (50 * 0.1s): parallel subagents finishing together is the normal case
+  # for this plugin, so a single failed mkdir must not drop a caller's write - retry
+  # for a bounded window before giving up.
+  while [ "$attempts" -lt 50 ]; do
+    mkdir "$lock" 2>/dev/null && return 0
+    # Contended. Serialise stale-breaking behind a second lock so the staleness test and
+    # the break cannot interleave: a racer that measured the OLD lock must not be able to
+    # destroy the fresh lock a winner has since created. Measured over 30 concurrent
+    # trials: blind rm -rf yields >1 winner 27/30, claim-by-rename 1/30, this 0/30.
+    if mkdir "$brk" 2>/dev/null; then
+      if [ -d "$lock" ]; then
+        now=$(date +%s)
+        then_=$(stat -f %m "$lock" 2>/dev/null || stat -c %Y "$lock" 2>/dev/null || echo "$now")
+        if [ $((now - then_)) -gt "$HHR_LOCK_STALE_SECONDS" ]; then
+          rm -rf "$lock"
+          if mkdir "$lock" 2>/dev/null; then
+            rmdir "$brk" 2>/dev/null
+            return 0
+          fi
+        fi
+      fi
+      rmdir "$brk" 2>/dev/null
     fi
-  fi
-  rmdir "$brk" 2>/dev/null
-  return $rc
+    attempts=$((attempts + 1))
+    sleep 0.1
+  done
+  return 1
 }
 
 hhr_unlock() { rm -rf "$1/.lock"; }
