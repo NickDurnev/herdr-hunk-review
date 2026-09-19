@@ -1,15 +1,26 @@
 {
-  "name": "nick-local",
+  "name": "nickdurnev",
   "owner": {
-    "name": "Nick"
+    "name": "Nick Durnev"
   },
-  "description": "Local plugins",
+  "description": "Claude Code plugins by Nick Durnev",
   "plugins": [
     {
       "name": "herdr-hunk-review",
       "source": "./",
-      "description": "Live session diff pane via herdr + hunk",
-      "version": "0.1.0"
+      "description": "A live hunk diff pane showing everything a Claude Code session changed, across every repo, refreshed whenever an agent or subagent finishes.",
+      "version": "0.1.0",
+      "homepage": "https://github.com/NickDurnev/herdr-hunk-review",
+      "license": "MIT",
+      "keywords": [
+        "diff",
+        "review",
+        "herdr",
+        "hunk",
+        "subagents",
+        "git",
+        "worktree"
+      ]
     }
   ]
 }

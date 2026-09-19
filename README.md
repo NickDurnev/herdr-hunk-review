@@ -78,15 +78,22 @@ bash-only or GNU-only constructs.
 
 ## Installation
 
-From this repo's directory:
+In Claude Code:
+
+```
+/plugin marketplace add NickDurnev/herdr-hunk-review
+/plugin install herdr-hunk-review@nickdurnev
+```
+
+To work from a local checkout instead, point the first command at the directory:
 
 ```
 /plugin marketplace add /path/to/herdr-hunk-review
-/plugin install herdr-hunk-review@nick-local
+/plugin install herdr-hunk-review@nickdurnev
 ```
 
-Once this repo is published, installing straight from GitHub (`/plugin marketplace add
-NickDurnev/herdr-hunk-review`) will also work — for now, use the local path above.
+Nothing else is required: the hooks register themselves, and the pane appears the first
+time the session changes a file in a git repository.
 
 ## Commands
 
