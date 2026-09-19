@@ -12,6 +12,9 @@ session="$1"
 [ -n "$session" ] || exit 0
 dir="$(hhr_state_dir "$session")" || exit 0
 hhr_guard "$dir"
+# Refreshing (and only refreshing) stops while paused; recording still happens via
+# prebaseline.sh/track.sh/note.sh regardless, so nothing edited while paused is lost.
+[ -e "$dir/paused" ] && exit 0
 
 # A refresh already in flight will pick up our writes; skipping is correct, not a loss.
 hhr_lock "$dir" || exit 0
@@ -23,8 +26,15 @@ hhr_build_sidecar "$dir"
 [ -s "$dir/combined.patch" ] || exit 0
 
 if [ "$(jq -r '.watch_stalled // false' "$dir/state.json" 2>/dev/null)" = "true" ]; then
-  hhr_pane_restart "$dir"
-  exit 0
+  if [ -f "$dir/pane" ] && hhr_pane_alive "$(cat "$dir/pane")"; then
+    hhr_pane_restart "$dir"
+    exit 0
+  fi
+  # The pane the viewer used to live in is gone (the user closed it, or none ever
+  # opened). watch_stalled is write-once and there is nothing left to restart, so clear
+  # it and fall through to hhr_pane_ensure below - otherwise every future refresh keeps
+  # taking this branch and the viewer can never come back.
+  jq '.watch_stalled = false' "$dir/state.json" > "$dir/.s.tmp" && mv "$dir/.s.tmp" "$dir/state.json"
 fi
 
 hhr_pane_ensure "$dir"

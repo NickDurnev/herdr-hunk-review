@@ -36,6 +36,31 @@ teardown() { teardown_scratch; }
   [ ! -f "$DIR/combined.patch" ]
 }
 
+@test "a repo first touched while paused still produces a correct diff once resumed" {
+  # Recording (prebaseline.sh + track.sh) must not be gated on `paused` - only
+  # refresh.sh is. Otherwise a repo first touched during a paused stretch never gets a
+  # pre-write baseline, and once resumed every edit made while paused is invisible.
+  REPO2="$(make_repo "$SCRATCH/repoB")"
+  D2="$CLAUDE_PLUGIN_DATA/sessions/s2"
+  mkdir -p "$D2"; touch "$D2/paused"
+
+  sh -c 'printf "%s" "$1" | sh "$2/scripts/prebaseline.sh"' _ \
+    "$(post_tool_payload s2 a1 "$REPO2/tracked.txt")" "$HHR_ROOT"
+  printf 'paused edit\n' >> "$REPO2/tracked.txt"
+  sh -c 'printf "%s" "$1" | sh "$2/scripts/track.sh"' _ \
+    "$(post_tool_payload s2 a1 "$REPO2/tracked.txt")" "$HHR_ROOT"
+
+  # Still paused: refresh must produce nothing.
+  sh "$HHR_ROOT/scripts/refresh.sh" s2
+  [ ! -f "$D2/combined.patch" ]
+
+  # Resume: the next refresh must show the edit made while paused.
+  rm -f "$D2/paused"
+  sh "$HHR_ROOT/scripts/refresh.sh" s2
+  [ -s "$D2/combined.patch" ]
+  grep -q '^+paused edit' "$D2/combined.patch"
+}
+
 @test "still writes artifacts with HERDR_ENV unset" {
   unset HERDR_ENV
   sh "$HHR_ROOT/scripts/refresh.sh" s1
@@ -79,4 +104,32 @@ EOF
   sh "$HHR_ROOT/scripts/refresh.sh" s1
   jq -e '.watch_stalled == true' "$DIR/state.json"
   grep -q 'send-keys' "$HERDR_STUB_LOG"
+}
+
+@test "watch_stalled is cleared and the pane recreated when the old pane is gone" {
+  # watch_stalled is write-once. If the user closes the pane after it stalls, restart
+  # (send-keys into a dead pane id) is a permanent no-op and the viewer can never come
+  # back - unless the flag is cleared so hhr_pane_ensure gets a chance to recreate it.
+  STUB="$SCRATCH/bin"; mkdir -p "$STUB"; export PATH="$STUB:$PATH"
+  printf '#!/bin/sh\nexit 0\n' > "$STUB/hunk"; chmod +x "$STUB/hunk"
+  cat > "$STUB/herdr" <<'EOF'
+#!/bin/sh
+echo "$@" >> "$HERDR_STUB_LOG"
+case "$1 $2" in
+  "pane list")   echo '{"result":{"panes":[]}}' ;;
+  "pane layout") echo '{"result":{"layout":{"area":{"width":120,"height":40}}}}' ;;
+  "pane split")  echo '{"result":{"pane":{"pane_id":"w1:p1"}}}' ;;
+  *) echo '{"result":{}}' ;;
+esac
+EOF
+  chmod +x "$STUB/herdr"
+  export HERDR_STUB_LOG="$SCRATCH/herdr.log"; : > "$HERDR_STUB_LOG"
+  export HERDR_ENV=1
+  jq '.watch_stalled = true' "$DIR/state.json" > "$DIR/t" && mv "$DIR/t" "$DIR/state.json"
+  # No $DIR/pane file: the pane the viewer used to live in is gone.
+  sh "$HHR_ROOT/scripts/refresh.sh" s1
+  [ "$(jq -r '.watch_stalled' "$DIR/state.json")" = "false" ]
+  grep -q 'pane split' "$HERDR_STUB_LOG"
+  run grep -q 'send-keys' "$HERDR_STUB_LOG"
+  [ "$status" -ne 0 ]
 }
