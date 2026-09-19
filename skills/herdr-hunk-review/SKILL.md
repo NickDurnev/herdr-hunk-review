@@ -48,7 +48,7 @@ numbers you read earlier in the conversation can go stale when that happens - re
 ## Steer
 
 ```bash
-hunk session navigate <sid> --file billing-api/app/campaigns/handlers.py --hunk 1
+hunk session navigate <sid> --file billing-api/app/invoices/handlers.py --hunk 1
 hunk session navigate <sid> --file <path> --new-line 128
 ```
 
