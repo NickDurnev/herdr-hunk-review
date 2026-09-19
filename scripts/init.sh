@@ -7,5 +7,11 @@ hhr_have jq || exit 0
 session=$(printf '%s' "$payload" | hhr_json_get session_id)
 [ -n "$session" ] || exit 0
 dir="$(hhr_state_dir "$session")" || exit 0
-[ -f "$dir/state.json" ] || printf '{"repos":{},"agents":{}}' > "$dir/state.json"
+# Lock before writing: this runs async and can otherwise interleave with the
+# synchronous prebaseline.sh on the very first edit, truncating a just-written
+# baseline back to the empty skeleton.
+if hhr_lock "$dir"; then
+  [ -f "$dir/state.json" ] || printf '{"repos":{},"agents":{}}' > "$dir/state.json"
+  hhr_unlock "$dir"
+fi
 exit 0
