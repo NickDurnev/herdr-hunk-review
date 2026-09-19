@@ -32,6 +32,10 @@ file="$filedir/$(basename "$file")"
 root=$(git -C "$filedir" rev-parse --show-toplevel 2>/dev/null) || root=
 [ -n "$root" ] || { hhr_unlock "$dir"; exit 0; }
 
+# Fallback only: prebaseline.sh (PreToolUse) normally captures this baseline before the
+# write lands. This still runs for sessions where PreToolUse never fired (e.g. the plugin
+# was enabled mid-session), and it still swallows the first edit — but that beats recording
+# nothing for a repo this hook has otherwise never seen.
 # Snapshot the baseline the first time this repo is seen.
 if [ "$(jq -r --arg r "$root" '.repos[$r] // empty' "$state")" = "" ]; then
   base=$(git -C "$root" stash create 2>/dev/null) || base=

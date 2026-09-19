@@ -3,6 +3,9 @@
     "SessionStart": [
       { "hooks": [ { "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/init.sh\"", "async": true, "timeout": 10 } ] }
     ],
+    "PreToolUse": [
+      { "matcher": "Edit|Write|NotebookEdit", "hooks": [ { "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/prebaseline.sh\"", "timeout": 15 } ] }
+    ],
     "PostToolUse": [
       { "matcher": "Edit|Write|NotebookEdit", "hooks": [ { "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/track.sh\"", "async": true, "timeout": 20 } ] }
     ],
