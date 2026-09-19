@@ -41,11 +41,13 @@ hhr_build_patch() {
     mv "$tmp.cut" "$tmp"
   fi
 
-  # Skip the move when nothing changed, so watchers do not reload needlessly.
-  if [ -f "$dir/combined.patch" ]; then
-    old=$(shasum -a 256 < "$dir/combined.patch" | cut -d' ' -f1)
-    new=$(shasum -a 256 < "$tmp" | cut -d' ' -f1)
-    if [ "$old" = "$new" ]; then rm -f "$tmp"; return 0; fi
+  # Skip the move when nothing changed, so watchers do not reload needlessly. Compare
+  # content directly with cmp rather than hashing: a missing shasum makes both sides of
+  # a hash comparison resolve to the same empty string, so the "unchanged" branch fires
+  # even when the patch changed, and the new patch is discarded forever.
+  if [ -f "$dir/combined.patch" ] && cmp -s "$tmp" "$dir/combined.patch"; then
+    rm -f "$tmp"
+    return 0
   fi
   mv "$tmp" "$dir/combined.patch"
   return 0
