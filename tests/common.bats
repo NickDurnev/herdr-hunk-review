@@ -30,13 +30,46 @@ teardown() { teardown_scratch; }
   hhr_lock "$d"
 }
 
-@test "lock breaks a stale lock" {
+@test "lock breaks a stale lock and then holds it" {
   d="$(hhr_state_dir sess-stale)"
   mkdir -p "$d/.lock"
   # backdate beyond the stale threshold
   touch -t 200001010000 "$d/.lock"
   run hhr_lock "$d"
   [ "$status" -eq 0 ]
+  # The breaker must now OWN the lock, not merely have deleted it.
+  hhr_lock "$d" && false || true
+  [ -d "$d/.lock" ]
+}
+
+@test "only one racer wins a contested stale lock" {
+  d="$(hhr_state_dir sess-race)"
+  mkdir -p "$d/.lock"
+  touch -t 200001010000 "$d/.lock"
+  wins=0
+  for _ in 1 2 3; do
+    if ( . "$BATS_TEST_DIRNAME/../scripts/common.sh"; hhr_lock "$d" ); then
+      wins=$((wins + 1))
+    fi
+  done
+  # The first call breaks the stale lock and holds it; the rest must fail.
+  [ "$wins" -eq 1 ]
+  [ -z "$(ls -d "$d"/.lock.stale.* 2>/dev/null)" ]
+}
+
+@test "guard exits 0 and silently when the session is paused" {
+  d="$(hhr_state_dir sess-paused)"
+  touch "$d/paused"
+  run sh -c '. "$1/scripts/common.sh"; hhr_guard "$2"; echo REACHED' _ "$HHR_ROOT" "$d"
+  [ "$status" -eq 0 ]
+  [ "$output" != "REACHED" ]
+}
+
+@test "guard returns and lets the caller continue when not paused" {
+  d="$(hhr_state_dir sess-ok)"
+  run sh -c '. "$1/scripts/common.sh"; hhr_guard "$2"; echo REACHED' _ "$HHR_ROOT" "$d"
+  [ "$status" -eq 0 ]
+  [ "$output" = "REACHED" ]
 }
 
 @test "json_get reads a top-level string" {

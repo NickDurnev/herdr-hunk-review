@@ -32,8 +32,13 @@ hhr_lock() {
     now=$(date +%s)
     then_=$(stat -f %m "$lock" 2>/dev/null || stat -c %Y "$lock" 2>/dev/null || echo "$now")
     if [ $((now - then_)) -gt "$HHR_LOCK_STALE_SECONDS" ]; then
-      rm -rf "$lock"
-      mkdir "$lock" 2>/dev/null && return 0
+      # Claim the break by renaming: only one racer can move a given directory away,
+      # so only that racer goes on to re-acquire. A blind `rm -rf` here would let a
+      # second racer delete the winner's fresh lock and acquire it as well.
+      if mv "$lock" "$lock.stale.$$" 2>/dev/null; then
+        rm -rf "$lock.stale.$$"
+        mkdir "$lock" 2>/dev/null && return 0
+      fi
     fi
   fi
   return 1
