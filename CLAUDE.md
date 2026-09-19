@@ -22,7 +22,9 @@ Work on `main`.
 ## Shell rules
 
 Target POSIX `sh`; `/bin/bash` here is 3.2. No `flock` (use `mkdir` locking), no
-`sha256sum` (use `shasum -a 256`). Every hook exits 0 and writes nothing to stdout.
+`sha256sum`/`shasum` (a missing `shasum` makes both sides of a hash comparison resolve
+to the same empty string and silently discards real changes — use `cmp -s` to compare
+file content directly instead). Every hook exits 0 and writes nothing to stdout.
 
 ## Tests
 

@@ -64,10 +64,16 @@ would silently vanish from the diff. Taking it before the write closes that gap.
 
 - **`git`** and **`jq`** — required. Every hook that touches state needs them; without
   either, hooks exit cleanly and do nothing.
+- **`awk`**, **`stat`**, **`date`**, **`cmp`** — required. Used respectively to anchor
+  notes to changed lines, read lock/patch mtimes, parse `hunk`'s session timestamps, and
+  detect whether a rebuilt patch actually changed.
 - **`herdr`** — optional. Without it, no pane opens, but the combined patch and sidecar
   files are still written to the session's state directory on every refresh.
 - **`hunk`** — optional. Without it, the same applies: no viewer opens, but the patch
   file is still produced and can be opened with any other diff viewer.
+
+Developed and tested on macOS with bash 3.2; every script is POSIX `sh`, with no
+bash-only or GNU-only constructs.
 
 ## Installation
 
@@ -105,11 +111,12 @@ entirely and no notes render, even though the file exists and is well-formed.
 ## Token cost
 
 The automatic loop costs zero model tokens. Hooks run as ordinary shell scripts
-executed by the harness; their stdout is never injected back into the conversation, and
-the notes attached to each hunk are just the subagent's own closing report, sliced and
-reused rather than regenerated. The only standing cost is the `description` lines for
-the three commands and the skill, which sit in the always-loaded listing like any other
-plugin's.
+executed by the harness, and every one of this plugin's hooks deliberately prints
+nothing — that's what keeps the loop free of token cost, not any special handling on
+the harness side. The notes attached to each hunk are just the subagent's own closing
+report, sliced and reused rather than regenerated. The only standing cost is the
+`description` lines for the three commands and the skill, which sit in the
+always-loaded listing like any other plugin's.
 
 ## Troubleshooting
 
@@ -121,9 +128,10 @@ way; see [Using it outside herdr](#using-it-outside-herdr).
 **Notes aren't rendering.** Two separate requirements have to both hold: the viewer
 must be started with `--agent-notes`, and the sidecar needs at least one *ranged*
 annotation — a file-level summary alone renders nothing. If a subagent's note couldn't
-be anchored to a specific line (an unexpected `agent_id`/`agent_type`/`agent_output`
-field, for instance — see [Observed payloads](#observed-payloads) below), the annotation
-degrades to a bare `[agent]` header with no body, but the diff itself is unaffected.
+be attached at all (an unexpected `agent_id`/`agent_type`/`agent_output` field, for
+instance — see [Observed payloads](#observed-payloads) below), the result is no note on
+that file, not a degraded one — `note.sh` exits before writing anything when `agent_id`
+is missing. The diff itself is unaffected either way.
 
 **The pane stops updating.** `refresh.sh` detects a stalled watch by comparing the
 patch's write time against the live session's last-updated timestamp reported by
@@ -132,7 +140,9 @@ automatically on the next refresh. If it's still stuck after that, close the pan
 run `/hunk-review` to reopen it.
 
 **To pause automatic refreshing**, run `/hunk-pause` — it toggles a marker file that
-every hook checks before doing any work, and run it again to resume.
+`refresh.sh` checks before rebuilding the pane, and run it again to resume. Recording
+(which repo, which file, which agent, which closing note) is never gated on it — only
+the pane refresh is, so nothing edited while paused is lost once you resume.
 
 ## Observed payloads
 
@@ -141,9 +151,9 @@ The field names this plugin reads off hook payloads — `agent_id`, `agent_type`
 the wild; that capture is the one remaining verification step, and it needs the plugin
 installed in a real interactive session to run. Every read defaults safely (see
 `common.sh`'s `hhr_json_get` and the `// empty` / `// "agent"` fallbacks throughout the
-scripts), so if a name turns out to be wrong, the practical effect is a note that
-renders as a bare `[agent]` header with no body — the diff pane itself is unaffected
-either way.
+scripts), so if a name turns out to be wrong, the practical effect is that `note.sh`
+exits before writing anything — no note at all for that subagent's files — not a
+degraded or partial one. The diff pane itself is unaffected either way.
 
 ## Releasing
 
@@ -158,4 +168,5 @@ Ordinary commits never touch the version — only a release does, via `bump.sh`.
 
 ## Tests
 
-`bats tests/` — 80 tests, all passing.
+Requires `bats-core`: `brew install bats-core`. Then `bats tests/` — 84 tests, all
+passing.
