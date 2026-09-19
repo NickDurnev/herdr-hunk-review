@@ -42,19 +42,29 @@ teardown() { teardown_scratch; }
   [ -d "$d/.lock" ]
 }
 
-@test "only one racer wins a contested stale lock" {
-  d="$(hhr_state_dir sess-race)"
-  mkdir -p "$d/.lock"
-  touch -t 200001010000 "$d/.lock"
-  wins=0
-  for _ in 1 2 3; do
-    if ( . "$BATS_TEST_DIRNAME/../scripts/common.sh"; hhr_lock "$d" ); then
-      wins=$((wins + 1))
-    fi
+@test "only one of many CONCURRENT racers wins a contested stale lock" {
+  # Sequential calls cannot expose this bug: the second caller re-stats the winner's
+  # fresh lock, sees it is not stale, and declines. Only genuine concurrency, where
+  # several racers pass the staleness test before any of them acts, reproduces it.
+  # Five trials: against a blind `rm -rf` break this fails ~90% of the time per trial.
+  for trial in 1 2 3 4 5; do
+    d="$(hhr_state_dir "sess-race-$trial")"
+    mkdir -p "$d/.lock"
+    touch -t 200001010000 "$d/.lock"
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+      ( . "$BATS_TEST_DIRNAME/../scripts/common.sh"
+        hhr_lock "$d" && echo w >> "$d/wins" ) &
+    done
+    wait
+    winners=$(wc -l < "$d/wins" 2>/dev/null | tr -d ' ')
+    [ -n "$winners" ] || winners=0
+    [ "$winners" -eq 1 ] || {
+      echo "trial $trial: expected exactly 1 winner, got $winners"
+      false
+    }
+    # The break lock must never be left behind.
+    [ ! -d "$d/.lockbreak" ]
   done
-  # The first call breaks the stale lock and holds it; the rest must fail.
-  [ "$wins" -eq 1 ]
-  [ -z "$(ls -d "$d"/.lock.stale.* 2>/dev/null)" ]
 }
 
 @test "guard exits 0 and silently when the session is paused" {
