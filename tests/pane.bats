@@ -89,13 +89,16 @@ src() { sh -c ". \"$HHR_ROOT/scripts/pane.sh\"; $1" ; }
   # can open" — not to a pane running a command that does not exist.
   export HERDR_ENV=1 HERDR_PANE_ID=w1:p1
   rm -f "$STUB/hunk"
-  # A dev machine may have a real hunk elsewhere on PATH (e.g. Homebrew); strip its
-  # directory too so this actually exercises "hunk not installed", not just "not stubbed".
-  if hpath=$(command -v hunk 2>/dev/null); then
+  # A dev machine may have a real hunk elsewhere on PATH (e.g. Homebrew), and
+  # setup_scratch also puts an inert default-bin stub on PATH as a safety net -
+  # loop, not `if`, so every directory that resolves a hunk gets stripped, not
+  # just the first, so this actually exercises "hunk not installed", not just
+  # "not stubbed".
+  while hpath=$(command -v hunk 2>/dev/null); do
     hdir=$(dirname "$hpath")
     PATH=$(printf '%s' "$PATH" | awk -v d="$hdir" 'BEGIN{RS=":"} $0!=d{printf "%s:", $0}' | sed 's/:$//')
     export PATH
-  fi
+  done
   src "hhr_pane_ensure '$DIR'"
   [ ! -f "$DIR/pane" ]
   run grep -q 'pane split' "$HERDR_STUB_LOG"

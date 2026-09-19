@@ -3,6 +3,21 @@ setup_scratch() {
   export CLAUDE_PLUGIN_DATA="$SCRATCH/data"
   mkdir -p "$CLAUDE_PLUGIN_DATA"
   export HHR_ROOT="$BATS_TEST_DIRNAME/.."
+
+  # The suite must NEVER touch the real herdr or hunk. These tests run inside a live
+  # herdr session, so without this a test that reaches hhr_pane_ensure splits a REAL
+  # pane in the user's terminal and abandons it when the scratch dir is torn down.
+  # Two independent guards, because either alone has failed in practice:
+  #   1. clear the env flag every pane code path checks first
+  #   2. shadow both binaries with inert stubs on PATH
+  unset HERDR_ENV
+  HHR_STUB_BIN="$SCRATCH/default-bin"
+  mkdir -p "$HHR_STUB_BIN"
+  for b in herdr hunk; do
+    printf '#!/bin/sh\nexit 0\n' > "$HHR_STUB_BIN/$b"
+    chmod +x "$HHR_STUB_BIN/$b"
+  done
+  export PATH="$HHR_STUB_BIN:$PATH"
 }
 
 teardown_scratch() {
