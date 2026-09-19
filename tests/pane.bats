@@ -6,6 +6,15 @@ setup() {
   printf 'patch\n' > "$DIR/combined.patch"
   printf '{}\n'    > "$DIR/agent-context.json"
   STUB="$SCRATCH/bin"; mkdir -p "$STUB"; export PATH="$STUB:$PATH"
+  # Stub BOTH binaries: hhr_pane_ensure legitimately guards on each, so a suite that
+  # stubs only herdr would force the guard on hunk to be removed just to stay green.
+  cat > "$STUB/hunk" <<'EOF'
+#!/bin/sh
+echo "hunk $@" >> "$HERDR_STUB_LOG"
+[ "$1 $2" = "session list" ] && echo '{"sessions":[]}'
+exit 0
+EOF
+  chmod +x "$STUB/hunk"
   cat > "$STUB/herdr" <<'EOF'
 #!/bin/sh
 echo "$@" >> "$HERDR_STUB_LOG"
@@ -62,6 +71,24 @@ src() { sh -c ". \"$HHR_ROOT/scripts/pane.sh\"; $1" ; }
   q_line=$(grep -n 'send-keys' "$HERDR_STUB_LOG" | head -1 | cut -d: -f1)
   r_line=$(grep -n 'pane run'  "$HERDR_STUB_LOG" | head -1 | cut -d: -f1)
   [ -n "$q_line" ] && [ -n "$r_line" ] && [ "$q_line" -lt "$r_line" ]
+}
+
+@test "ensure opens no pane when hunk is not installed" {
+  # The spec promises a missing hunk degrades to "a valid patch file any diff viewer
+  # can open" — not to a pane running a command that does not exist.
+  export HERDR_ENV=1 HERDR_PANE_ID=w1:p1
+  rm -f "$STUB/hunk"
+  # A dev machine may have a real hunk elsewhere on PATH (e.g. Homebrew); strip its
+  # directory too so this actually exercises "hunk not installed", not just "not stubbed".
+  if hpath=$(command -v hunk 2>/dev/null); then
+    hdir=$(dirname "$hpath")
+    PATH=$(printf '%s' "$PATH" | awk -v d="$hdir" 'BEGIN{RS=":"} $0!=d{printf "%s:", $0}' | sed 's/:$//')
+    export PATH
+  fi
+  src "hhr_pane_ensure '$DIR'"
+  [ ! -f "$DIR/pane" ]
+  run grep -q 'pane split' "$HERDR_STUB_LOG"
+  [ "$status" -ne 0 ]
 }
 
 @test "ensure is silent on stdout" {

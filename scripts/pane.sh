@@ -13,6 +13,7 @@ hhr_pane_ensure() {
   dir="$1"
   [ "${HERDR_ENV:-}" = 1 ] || return 0
   command -v herdr >/dev/null 2>&1 || return 0
+  command -v hunk  >/dev/null 2>&1 || return 0
   [ -s "$dir/combined.patch" ] || return 0
 
   if [ -f "$dir/pane" ] && hhr_pane_alive "$(cat "$dir/pane")"; then
