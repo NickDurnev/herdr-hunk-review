@@ -21,25 +21,16 @@ hhr_lock "$dir" || exit 0
 state="$dir/state.json"
 [ -f "$state" ] || printf '{"repos":{},"agents":{}}' > "$state"
 
-# Find git root by walking up the directory tree, without resolving symlinks.
-root=""
-search_dir="$(dirname "$file")"
-while [ -n "$search_dir" ] && [ "$search_dir" != "/" ]; do
-  if [ -d "$search_dir/.git" ]; then
-    root="$search_dir"
-    break
-  fi
-  search_dir="$(dirname "$search_dir")"
-done
-
-# Only process if we found a repo.
-if [ -z "$root" ]; then
-  hhr_unlock "$dir"
-  exit 0
-fi
-
-# Verify it's a valid git repo by running a git command.
-git -C "$root" rev-parse --git-dir >/dev/null 2>&1 || { hhr_unlock "$dir"; exit 0; }
+# Resolve the file's directory to its PHYSICAL path first. On macOS /var is a symlink
+# to /private/var, and `rev-parse --show-toplevel` always answers physically; if the two
+# disagree, Task 5's `startswith($root + "/")` prefix match silently fails.
+filedir=$(cd "$(dirname "$file")" 2>/dev/null && pwd -P) || { hhr_unlock "$dir"; exit 0; }
+file="$filedir/$(basename "$file")"
+# Ask git, never walk for `.git` by hand: in a linked worktree `.git` is a FILE, not a
+# directory, so a hand-rolled walk skips the worktree root and may attribute the file to
+# an enclosing repo. Worktrees are the primary use case for this plugin.
+root=$(git -C "$filedir" rev-parse --show-toplevel 2>/dev/null) || root=
+[ -n "$root" ] || { hhr_unlock "$dir"; exit 0; }
 
 # Snapshot the baseline the first time this repo is seen.
 if [ "$(jq -r --arg r "$root" '.repos[$r] // empty' "$state")" = "" ]; then

@@ -1,6 +1,6 @@
 load helper
 
-setup()    { setup_scratch; REPO="$(make_repo "$SCRATCH/repoA")"; }
+setup()    { setup_scratch; REPO="$(cd "$(make_repo "$SCRATCH/repoA")" && pwd -P)"; }
 teardown() { teardown_scratch; }
 
 run_track() { printf '%s' "$1" | sh "$HHR_ROOT/scripts/track.sh"; }
@@ -49,8 +49,7 @@ run_track() { printf '%s' "$1" | sh "$HHR_ROOT/scripts/track.sh"; }
   run run_track "$(post_tool_payload s9 a1 "$REPO/tracked.txt")"
   [ "$status" -eq 0 ]
   base="$(jq -r --arg r "$REPO" '.repos[$r].baseline' "$CLAUDE_PLUGIN_DATA/sessions/s9/state.json")"
-  [ -n "$base" ]
-  [ "$base" != "null" ]
+  [ "${#base}" -eq 40 ]
 }
 
 @test "works on a detached HEAD" {
@@ -67,8 +66,8 @@ run_track() { printf '%s' "$1" | sh "$HHR_ROOT/scripts/track.sh"; }
   [ "$(jq -r '.repos | length' "$CLAUDE_PLUGIN_DATA/sessions/s5/state.json")" -eq 0 ]
 }
 
-@test "deduplicates prefixes across two worktrees of one repo" {
-  R2="$(make_repo "$SCRATCH/repoA-wt")"
+@test "deduplicates prefixes for two unrelated repos sharing a basename" {
+  R2="$(cd "$(make_repo "$SCRATCH/repoA-wt")" && pwd -P)"
   run_track "$(post_tool_payload s6 a1 "$REPO/tracked.txt")"
   run_track "$(post_tool_payload s6 a1 "$R2/tracked.txt")"
   p1="$(jq -r --arg r "$REPO" '.repos[$r].prefix' "$CLAUDE_PLUGIN_DATA/sessions/s6/state.json")"
@@ -77,7 +76,7 @@ run_track() { printf '%s' "$1" | sh "$HHR_ROOT/scripts/track.sh"; }
 }
 
 @test "handles a path containing a space" {
-  R3="$(make_repo "$SCRATCH/repo with space")"
+  R3="$(cd "$(make_repo "$SCRATCH/repo with space")" && pwd -P)"
   run run_track "$(post_tool_payload s7 a1 "$R3/tracked.txt")"
   [ "$status" -eq 0 ]
   [ "$(jq -r '.repos | length' "$CLAUDE_PLUGIN_DATA/sessions/s7/state.json")" -eq 1 ]
@@ -87,4 +86,31 @@ run_track() { printf '%s' "$1" | sh "$HHR_ROOT/scripts/track.sh"; }
   run run_track "$(post_tool_payload s8 a1 "$REPO/tracked.txt")"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+}
+
+@test "tracks a file inside a real git worktree" {
+  # In a linked worktree `.git` is a file containing `gitdir: ...`, not a directory.
+  # A hand-rolled walk that tests `-d .git` finds nothing here and silently drops the
+  # change; if the worktree sits inside another repo it attributes the file to the
+  # enclosing repo instead. Worktrees are this plugin's primary use case.
+  git -C "$REPO" worktree add -q "$SCRATCH/repoA-live-wt" -b wtbranch
+  [ -f "$SCRATCH/repoA-live-wt/.git" ]
+  printf 'in worktree\n' >> "$SCRATCH/repoA-live-wt/tracked.txt"
+  run run_track "$(post_tool_payload s11 a1 "$SCRATCH/repoA-live-wt/tracked.txt")"
+  [ "$status" -eq 0 ]
+  st="$CLAUDE_PLUGIN_DATA/sessions/s11/state.json"
+  [ "$(jq -r '.repos | length' "$st")" -eq 1 ]
+  # The recorded root must be the worktree itself, not the repo it was created from.
+  root="$(jq -r '.repos | keys[0]' "$st")"
+  case "$root" in *repoA-live-wt) : ;; *) echo "wrong root: $root"; false ;; esac
+}
+
+@test "records the repo root as git reports it, so prefix matching works" {
+  # The stored root must be a prefix of the stored file path, or Task 5 cannot map an
+  # absolute path onto its repo prefix.
+  run_track "$(post_tool_payload s12 a1 "$REPO/tracked.txt")"
+  st="$CLAUDE_PLUGIN_DATA/sessions/s12/state.json"
+  root="$(jq -r '.repos | keys[0]' "$st")"
+  f="$(jq -r '.agents.a1.files[0]' "$st")"
+  case "$f" in "$root"/*) : ;; *) echo "file '$f' is not under root '$root'"; false ;; esac
 }
