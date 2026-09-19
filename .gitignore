@@ -3,3 +3,7 @@ node_modules/
 
 # Temporary files
 *.tmp
+
+# Design record — kept locally, not shipped in the public repo
+specs/
+plans/
