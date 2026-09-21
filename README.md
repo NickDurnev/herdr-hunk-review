@@ -156,16 +156,40 @@ run `/hunk-review` to reopen it.
 (which repo, which file, which agent, which closing note) is never gated on it — only
 the pane refresh is, so nothing edited while paused is lost once you resume.
 
+**I closed the pane and it came back anyway.** It shouldn't, as long as nothing new
+landed: `hhr_pane_ensure` remembers the patch's write time in a `shown` marker the moment
+a pane is opened (or reused), and when the pane is gone it compares that marker against
+the patch's current write time before reopening anything. Unchanged mtime means the user
+closed it deliberately and it stays closed; a changed mtime means new code landed and it
+reopens automatically. `/hunk-baseline` and `/hunk-pause` never touch this — only
+`/hunk-review` bypasses it (via `refresh.sh session_id force`), so that command always
+opens the pane regardless of the marker.
+
+**Inspecting the raw hook payload.** Set `HHR_DEBUG_PAYLOAD=1` in the environment
+Claude Code's hooks run in, reproduce the scenario you're debugging, then inspect
+`<dir>/payloads-<hook_event_name>.jsonl` in the session's state directory (one raw JSON
+line per hook invocation that ran while the flag was set). Currently wired into
+`note.sh` (`SubagentStop`) and `track.sh` (`PostToolUse`) — the two hooks that read the
+`agent_id`/`agent_type`/`agent_output` fields this plugin depends on. It is a complete
+no-op — no file touched, no output — whenever the variable is unset.
+
 ## Observed payloads
 
 The field names this plugin reads off hook payloads — `agent_id`, `agent_type`,
-`agent_output` — come from Claude Code's documentation, not from a payload captured in
-the wild; that capture is the one remaining verification step, and it needs the plugin
-installed in a real interactive session to run. Every read defaults safely (see
+`agent_output` — come from Claude Code's documentation. A real `SubagentStop` payload
+has since been observed: `agent_id` is populated as expected, but `agent_type` and
+`agent_output` arrive **present and empty** (`""`, not absent — the `// "agent"` and
+`// ""` fallbacks in `note.sh` exist for a missing field, not an empty one). In
+practice this means `note.sh` still records an entry per subagent, but with an empty
+type and no note text to show — the agent-notes feature is effectively inert in real use
+until a different source for that text is wired in, which is a deliberate follow-up
+decision, not something this plugin does on its own. Use `HHR_DEBUG_PAYLOAD=1` (see
+[Troubleshooting](#troubleshooting)) to capture the exact payload shape in your own
+session before deciding what to change. Every read defaults safely regardless (see
 `common.sh`'s `hhr_json_get` and the `// empty` / `// "agent"` fallbacks throughout the
-scripts), so if a name turns out to be wrong, the practical effect is that `note.sh`
-exits before writing anything — no note at all for that subagent's files — not a
-degraded or partial one. The diff pane itself is unaffected either way.
+scripts), so if a field is ever absent outright rather than empty, the practical effect
+is that `note.sh` exits before writing anything — no note at all for that subagent's
+files — not a degraded or partial one. The diff pane itself is unaffected either way.
 
 ## Releasing
 
@@ -180,5 +204,5 @@ Ordinary commits never touch the version — only a release does, via `bump.sh`.
 
 ## Tests
 
-Requires `bats-core`: `brew install bats-core`. Then `bats tests/` — 84 tests, all
+Requires `bats-core`: `brew install bats-core`. Then `bats tests/` — 98 tests, all
 passing.
