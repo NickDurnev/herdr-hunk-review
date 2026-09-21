@@ -1,6 +1,7 @@
 # Sourced. Builds <state_dir>/agent-context.json from state.json and combined.patch.
-# HHR_NOTE_MAX_CHARS is defined in common.sh (shared with note.sh); callers must
-# source common.sh before this file.
+# HHR_NOTE_MAX_CHARS is defined in common.sh (shared with note.sh); callers should
+# source common.sh before this file, but hhr_build_sidecar falls back to a default
+# on its own if that was skipped - see the guard comment at its point of use.
 
 # Prints "<prefixed-path>\t<side>\t<line>" for every file in the patch. The anchor
 # prefers the first ADDED line (the common replace-one-line shape is "-old" then
@@ -61,6 +62,14 @@ hhr_build_sidecar() {
   [ -f "$state" ] || return 0
   [ -f "$patch" ] || { printf '{"version":1,"summary":"","files":[]}' > "$out"; return 0; }
 
+  # Guard, not a second source of truth: common.sh remains the one place the intended
+  # value is configured. This default only stops an unset/empty HHR_NOTE_MAX_CHARS
+  # (e.g. a caller that forgot to source common.sh first) from making `"" | tonumber`
+  # raise inside the notes-extraction jq below - which its error handling would
+  # otherwise swallow, silently producing NO annotations at all. Do not delete this
+  # thinking common.sh's definition makes it redundant.
+  : "${HHR_NOTE_MAX_CHARS:=300}"
+
   anchors="$dir/.anchors.tsv"
   hhr_patch_anchors "$patch" > "$anchors"
 
@@ -70,7 +79,12 @@ hhr_build_sidecar() {
   # piping $f into startswith would otherwise rebind "." to the string $f itself.
   notes="$dir/.notes.tsv"
   : > "$notes"
-  jq -r --arg m "$HHR_NOTE_MAX_CHARS" '
+  # Non-fatal on failure (hooks must never break the user's session) but not silent
+  # either: a jq crash here used to be swallowed by `2>/dev/null || true` with zero
+  # trace, which is exactly the "notes vanish and look like there was nothing to
+  # show" failure this guard exists to prevent. Leave a breadcrumb on disk instead,
+  # the same way hhr_mark_shown (pane.sh) does for its own silent-write hazard.
+  if jq -r --arg m "$HHR_NOTE_MAX_CHARS" '
     [.repos | to_entries[] | {root: .key, prefix: .value.prefix}] as $repos
     | .agents | to_entries[]
     | . as $a
@@ -87,7 +101,12 @@ hhr_build_sidecar() {
        (($a.value.type // "agent")),
        (($a.value.output // "") | gsub("\\s+"; " ") | .[0:($m|tonumber)])
       ] | @tsv
-  ' "$state" >> "$notes" 2>/dev/null || true
+  ' "$state" >> "$notes" 2>/dev/null; then
+    rm -f "$dir/.notes-extract-error" 2>/dev/null
+  else
+    printf 'notes extraction failed at %s\n' "$(date +%s 2>/dev/null || echo 0)" \
+      >> "$dir/.notes-extract-error" 2>/dev/null || true
+  fi
 
   repos_count=$(jq -r '.repos | length' "$state")
   files_count=$(wc -l < "$anchors" | tr -d ' ')

@@ -20,6 +20,12 @@ teardown() { teardown_scratch; }
 write_state() { printf '%s' "$1" > "$DIR/state.json"; }
 build() { sh -c '. "$1/scripts/common.sh"; . "$1/scripts/sidecar.sh"; hhr_build_sidecar "$2"' _ "$HHR_ROOT" "$DIR"; }
 
+# Sources ONLY sidecar.sh - never common.sh - so HHR_NOTE_MAX_CHARS is unset going
+# into hhr_build_sidecar, exactly the hazard the note-max-chars guard exists for:
+# without it, `"" | tonumber` inside the notes-extraction jq raises and the whole
+# annotation set silently disappears.
+build_no_common() { sh -c 'unset HHR_NOTE_MAX_CHARS; . "$1/scripts/sidecar.sh"; hhr_build_sidecar "$2"' _ "$HHR_ROOT" "$DIR"; }
+
 @test "emits a ranged annotation anchored to the first added line" {
   write_state "$(jq -nc --arg f "/x/repoA/tracked.txt" \
     '{repos:{"/x/repoA":{baseline:"b",prefix:"repoA"}},
@@ -201,4 +207,57 @@ EOF
   write_state "$(jq -nc '{repos:{},agents:{}}')"
   build
   jq -e '.' "$DIR/agent-context.json"
+}
+
+# --- HHR_NOTE_MAX_CHARS guard: common.sh not sourced must not mean no notes ---
+
+@test "sidecar.sh sourced without common.sh still produces annotations" {
+  write_state "$(jq -nc --arg f "/x/repoA/tracked.txt" \
+    '{repos:{"/x/repoA":{baseline:"b",prefix:"repoA"}},
+      agents:{a1:{type:"impl",output:"Made the dep required.",files:[$f]}}}')"
+  build_no_common
+  [ "$(jq -r '.files | length' "$DIR/agent-context.json")" -eq 1 ]
+  jq -e '.files[0].annotations[0].summary | test("Made the dep required")' "$DIR/agent-context.json"
+}
+
+@test "sidecar.sh sourced without common.sh still truncates a very long output" {
+  long="$(head -c 2000 /dev/zero | tr '\0' 'x')"
+  write_state "$(jq -nc --arg f "/x/repoA/tracked.txt" --arg o "$long" \
+    '{repos:{"/x/repoA":{baseline:"b",prefix:"repoA"}},
+      agents:{a1:{type:"impl",output:$o,files:[$f]}}}')"
+  build_no_common
+  [ "$(jq -r '.files[0].annotations[0].summary | length' "$DIR/agent-context.json")" -lt 400 ]
+}
+
+@test "a real HHR_NOTE_MAX_CHARS from common.sh overrides the built-in default" {
+  # The default guard must be just that - a guard - never a second source of truth
+  # that silently wins over the real configured value from common.sh.
+  long="$(head -c 2000 /dev/zero | tr '\0' 'x')"
+  write_state "$(jq -nc --arg f "/x/repoA/tracked.txt" --arg o "$long" \
+    '{repos:{"/x/repoA":{baseline:"b",prefix:"repoA"}},
+      agents:{a1:{type:"impl",output:$o,files:[$f]}}}')"
+  build
+  got="$(jq -r '.files[0].annotations[0].summary' "$DIR/agent-context.json")"
+  # "[impl] " prefix (7 chars) + HHR_NOTE_MAX_CHARS (300) from common.sh.
+  [ "${#got}" -eq 307 ]
+}
+
+@test "breadcrumb is written and the run still exits 0 when the notes-extraction jq fails" {
+  # files:"notarray" (a string, not an array) makes `($a.value.files // [])[]` raise
+  # "Cannot iterate over string" - a real failure of the notes-extraction jq, not a
+  # simulated one.
+  printf '{"repos":{},"agents":{"a1":{"type":"impl","output":"x","files":"notarray"}}}' \
+    > "$DIR/state.json"
+  run build
+  [ "$status" -eq 0 ]
+  [ -f "$DIR/.notes-extract-error" ]
+  [ -s "$DIR/.notes-extract-error" ]
+}
+
+@test "no breadcrumb when the notes-extraction jq succeeds" {
+  write_state "$(jq -nc --arg f "/x/repoA/tracked.txt" \
+    '{repos:{"/x/repoA":{baseline:"b",prefix:"repoA"}},
+      agents:{a1:{type:"impl",output:"fine",files:[$f]}}}')"
+  build
+  [ ! -f "$DIR/.notes-extract-error" ]
 }

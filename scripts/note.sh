@@ -57,6 +57,13 @@ fi
 # Collapse whitespace and truncate exactly the way the sidecar renders notes (same
 # HHR_NOTE_MAX_CHARS, from common.sh), so a note read back out of state.json is
 # already what the pane will show, regardless of which source it came from.
+#
+# Guard, not a second source of truth: common.sh remains the one place the intended
+# value is configured. This default only stops an unset/empty HHR_NOTE_MAX_CHARS
+# (e.g. common.sh not sourced) from making `"" | tonumber` raise inside the jq below
+# - which the `|| true` a few lines up would then swallow, silently producing NO note
+# at all. Do not delete this thinking common.sh's definition makes it redundant.
+: "${HHR_NOTE_MAX_CHARS:=300}"
 if [ "$note_source" != none ]; then
   note_text=$(printf '%s' "$note_text" \
     | jq -Rsr --arg m "$HHR_NOTE_MAX_CHARS" '. | gsub("\\s+"; " ") | .[0:($m|tonumber)]')
