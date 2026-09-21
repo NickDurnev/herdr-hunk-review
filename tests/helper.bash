@@ -75,3 +75,16 @@ assistant_text_record() {
 session_end_payload() {
   jq -nc --arg s "$1" '{session_id:$s, hook_event_name:"SessionEnd"}'
 }
+
+# Records $2 as a file the session touched, in $1 (a state.json), matching track.sh's
+# own write (agents[<agent>].files[], physical pwd -P path). patch.sh only includes an
+# untracked file when it appears here - this is how a test says "the session touched
+# this file" rather than "this file merely exists untracked in the repo".
+mark_touched() {
+  state="$1" path="$2" agent="${3:-main}"
+  full="$(cd "$(dirname "$path")" && pwd -P)/$(basename "$path")"
+  jq --arg a "$agent" --arg f "$full" \
+     '.agents[$a] = (.agents[$a] // {type:"", output:"", files:[]})
+      | .agents[$a].files = ((.agents[$a].files + [$f]) | unique)' \
+     "$state" > "$state.tmp" && mv "$state.tmp" "$state"
+}

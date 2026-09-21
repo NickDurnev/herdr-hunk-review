@@ -20,7 +20,24 @@ hhr_patch_mtime() {
 # header comment on why a hash isn't used either). combined.patch is capped at
 # HHR_MAX_PATCH_BYTES (5MB, see patch.sh), so the extra copy is bounded - do not
 # "optimise" this back to a timestamp or hash; that reintroduces the same-second bug.
-hhr_mark_shown() { cp "$1/combined.patch" "$1/shown.patch" 2>/dev/null || true; }
+#
+# A silently-failed write here is worse than a slow one: without shown.patch,
+# hhr_pane_ensure can never reach the close-acknowledgment branch, so a closed pane
+# reopens forever with no visible cause. Write through a same-directory tmp file and
+# `mv` into place (atomic - no reader ever sees a partial shown.patch), and if either
+# step fails, leave a breadcrumb on disk instead of swallowing it: hooks must stay
+# silent on stdout, but "silent" must not mean "undiagnosable".
+hhr_mark_shown() {
+  dir="$1"
+  tmp="$dir/.shown.patch.tmp.$$"
+  if cp "$dir/combined.patch" "$tmp" 2>/dev/null && mv "$tmp" "$dir/shown.patch" 2>/dev/null; then
+    rm -f "$dir/.shown-patch-error" 2>/dev/null
+    return 0
+  fi
+  rm -f "$tmp" 2>/dev/null
+  printf 'mark_shown failed at %s\n' "$(date +%s 2>/dev/null || echo 0)" >> "$dir/.shown-patch-error" 2>/dev/null || true
+  return 1
+}
 
 hhr_pane_ensure() {
   dir="$1"
@@ -34,11 +51,11 @@ hhr_pane_ensure() {
     # exited (crash, `q`, `hunk session` reaped). A live patch session is the signal
     # the viewer is actually running, so check that before trusting the pane.
     if [ -n "$(hhr_session_id "$dir")" ]; then
-      hhr_mark_shown "$dir"
+      hhr_mark_shown "$dir" || true
       return 0
     fi
     hhr_pane_restart "$dir"
-    hhr_mark_shown "$dir"
+    hhr_mark_shown "$dir" || true
     return 0
   fi
 
@@ -82,7 +99,7 @@ hhr_pane_ensure() {
   [ -n "$pane" ] || return 0
   printf '%s' "$pane" > "$dir/pane"
   herdr pane run "$pane" "$(hhr_viewer_cmd "$dir")" >/dev/null 2>&1 || true
-  hhr_mark_shown "$dir"
+  hhr_mark_shown "$dir" || true
   return 0
 }
 

@@ -250,3 +250,39 @@ src() { sh -c ". \"$HHR_ROOT/scripts/common.sh\"; . \"$HHR_ROOT/scripts/patch.sh
   [ "$status" -eq 0 ]
   [ ! -f "$DIR/shown.patch" ]
 }
+
+@test "hhr_mark_shown writes shown.patch byte-for-byte after a successful display" {
+  run src "hhr_mark_shown '$DIR'"
+  [ "$status" -eq 0 ]
+  run cmp -s "$DIR/combined.patch" "$DIR/shown.patch"
+  [ "$status" -eq 0 ]
+}
+
+@test "hhr_mark_shown leaves a diagnosable breadcrumb, not a silent failure, when the copy cannot be written" {
+  # Simulate a persistent write failure (disk full, permissions) by shadowing cp with
+  # one that always fails. Before the fix this was hidden entirely behind
+  # `2>/dev/null || true` - no marker, no trace, and the pane would reopen forever with
+  # no way to tell why.
+  FAILBIN="$SCRATCH/failbin"; mkdir -p "$FAILBIN"
+  printf '#!/bin/sh\nexit 1\n' > "$FAILBIN/cp"; chmod +x "$FAILBIN/cp"
+  export PATH="$FAILBIN:$PATH"
+  run src "hhr_mark_shown '$DIR'"
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+  [ ! -f "$DIR/shown.patch" ]
+  # No dangling temp file left behind either.
+  run sh -c 'ls "$1"/.shown.patch.tmp.* 2>/dev/null' _ "$DIR"
+  [ -z "$output" ]
+  [ -s "$DIR/.shown-patch-error" ]
+}
+
+@test "a later successful hhr_mark_shown clears a previous failure breadcrumb" {
+  FAILBIN="$SCRATCH/failbin"; mkdir -p "$FAILBIN"
+  printf '#!/bin/sh\nexit 1\n' > "$FAILBIN/cp"; chmod +x "$FAILBIN/cp"
+  PATH="$FAILBIN:$PATH" src "hhr_mark_shown '$DIR'" || true
+  [ -s "$DIR/.shown-patch-error" ]
+
+  src "hhr_mark_shown '$DIR'"
+  [ -f "$DIR/shown.patch" ]
+  [ ! -f "$DIR/.shown-patch-error" ]
+}

@@ -9,7 +9,7 @@
       "name": "herdr-hunk-review",
       "source": "./",
       "description": "A live hunk diff pane showing everything a Claude Code session changed, across every repo, refreshed whenever an agent or subagent finishes.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "homepage": "https://github.com/NickDurnev/herdr-hunk-review",
       "license": "MIT",
       "keywords": [
