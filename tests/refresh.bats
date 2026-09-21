@@ -76,7 +76,10 @@ teardown() { teardown_scratch; }
   [ -s "$DIR/combined.patch" ]
 }
 
-@test "force reopens a pane the user closed even though nothing changed since; a plain refresh does not" {
+# Shared herdr/hunk stub for the close-detection tests below: "pane list" always
+# reports no panes (the pane the user closed never comes back on its own), and "hunk
+# session list" always reports no live viewer session.
+stub_closed_pane() {
   STUB="$SCRATCH/bin"; mkdir -p "$STUB"; export PATH="$STUB:$PATH"
   cat > "$STUB/hunk" <<'EOF'
 #!/bin/sh
@@ -97,26 +100,165 @@ EOF
   chmod +x "$STUB/herdr"
   export HERDR_STUB_LOG="$SCRATCH/herdr.log"; : > "$HERDR_STUB_LOG"
   export HERDR_ENV=1
+}
 
-  # First refresh: no pane, no shown marker yet -> opens one.
+@test "a plain refresh does not reopen a pane the user closed when nothing changed, and acknowledges it instead" {
+  stub_closed_pane
+
+  # First refresh: no pane, no shown.patch marker yet -> opens one.
   sh "$HHR_ROOT/scripts/refresh.sh" s1
   first_splits=$(grep -c 'pane split' "$HERDR_STUB_LOG" || true)
   [ "$first_splits" -eq 1 ]
-  [ -f "$DIR/shown" ]
+  [ -f "$DIR/shown.patch" ]
 
   # User closes the pane (herdr's stubbed "pane list" already always reports none);
-  # nothing else changes. A plain refresh must NOT reopen it.
+  # nothing else changes. A plain refresh must NOT reopen it - but per PIX's close =
+  # acknowledge behavior, it must also silently move the baseline past the change that
+  # was shown, and leave the patch empty and shown.patch gone.
   rm -f "$DIR/pane"
   sh "$HHR_ROOT/scripts/refresh.sh" s1
   second_splits=$(grep -c 'pane split' "$HERDR_STUB_LOG" || true)
   [ "$second_splits" -eq 1 ]
   [ ! -f "$DIR/pane" ]
+  [ ! -s "$DIR/combined.patch" ]
+  [ ! -f "$DIR/shown.patch" ]
+  run git -C "$REPO" diff "$(jq -r --arg r "$REPO" '.repos[$r].baseline' "$DIR/state.json")"
+  [ -z "$output" ]
+}
 
-  # /hunk-review's force argument must reopen it regardless.
+@test "force reopens a pane the user closed and not-yet-acknowledged content, instead of silently swallowing it" {
+  stub_closed_pane
+
+  # First refresh: opens the pane and shows the current change.
+  sh "$HHR_ROOT/scripts/refresh.sh" s1
+  [ -f "$DIR/shown.patch" ]
+  before_baseline="$(jq -r --arg r "$REPO" '.repos[$r].baseline' "$DIR/state.json")"
+
+  # User closes the pane; nothing else changes. Force this very next refresh instead of
+  # a plain one - force clears shown.patch before hhr_pane_ensure ever gets a
+  # chance to read it, so the would-be silent acknowledgment never happens: the user
+  # asked to see the pane, so they see the content, not an empty one.
+  rm -f "$DIR/pane"
   sh "$HHR_ROOT/scripts/refresh.sh" s1 force
-  third_splits=$(grep -c 'pane split' "$HERDR_STUB_LOG" || true)
-  [ "$third_splits" -eq 2 ]
+  splits=$(grep -c 'pane split' "$HERDR_STUB_LOG" || true)
+  [ "$splits" -eq 2 ]
   [ -f "$DIR/pane" ]
+  grep -q '^+change' "$DIR/combined.patch"
+  after_baseline="$(jq -r --arg r "$REPO" '.repos[$r].baseline' "$DIR/state.json")"
+  [ "$before_baseline" = "$after_baseline" ]
+}
+
+@test "force with an empty combined.patch issues no pane split" {
+  # Minimal, decoupled from the close-detection feature: a repo with no uncommitted
+  # changes at all, so hhr_build_patch produces an empty patch on the very first run -
+  # this isolates the empty-patch guard itself from the close-acknowledgment path that
+  # also happens to leave an empty patch.
+  git -C "$REPO" checkout -q -- tracked.txt
+  stub_closed_pane
+
+  run sh "$HHR_ROOT/scripts/refresh.sh" s1 force
+  [ "$status" -eq 0 ]
+  [ ! -s "$DIR/combined.patch" ]
+  run grep -q 'pane split' "$HERDR_STUB_LOG"
+  [ "$status" -ne 0 ]
+  [ ! -f "$DIR/pane" ]
+}
+
+@test "force does nothing (no pane opens) once the content has already been acknowledged" {
+  stub_closed_pane
+
+  sh "$HHR_ROOT/scripts/refresh.sh" s1
+  rm -f "$DIR/pane"
+  sh "$HHR_ROOT/scripts/refresh.sh" s1
+  [ ! -s "$DIR/combined.patch" ]
+
+  sh "$HHR_ROOT/scripts/refresh.sh" s1 force
+  splits=$(grep -c 'pane split' "$HERDR_STUB_LOG" || true)
+  [ "$splits" -eq 1 ]
+  [ ! -f "$DIR/pane" ]
+}
+
+@test "close detected with an unchanged patch: a change made after that point appears next time, the acknowledged change does not" {
+  stub_closed_pane
+
+  sh "$HHR_ROOT/scripts/refresh.sh" s1
+  rm -f "$DIR/pane"
+  sh "$HHR_ROOT/scripts/refresh.sh" s1
+  [ ! -s "$DIR/combined.patch" ]
+
+  printf 'after close\n' >> "$REPO/tracked.txt"
+  sh "$HHR_ROOT/scripts/refresh.sh" s1
+  [ -s "$DIR/combined.patch" ]
+  grep -q '^+after close' "$DIR/combined.patch"
+  run grep -q '^+change$' "$DIR/combined.patch"
+  [ "$status" -ne 0 ]
+}
+
+@test "the trap: content landing between the display and the close detection is not acknowledged - the pane reopens and the baseline does not move" {
+  stub_closed_pane
+
+  # Shown once.
+  sh "$HHR_ROOT/scripts/refresh.sh" s1
+  before_baseline="$(jq -r --arg r "$REPO" '.repos[$r].baseline' "$DIR/state.json")"
+
+  # Deliberately NO sleep here: the close and the new work must be able to land in the
+  # very same wall-clock second as the display above. shown.patch is a byte-for-byte
+  # content snapshot, not a timestamp, so this test genuinely exercises the trap
+  # regardless of timing - an mtime-based implementation (`stat`'s mtime is
+  # second-resolution) would read two same-second patch rewrites as identical and
+  # wrongly acknowledge this change.
+  # The pane is closed AND new work lands before the close is ever detected - this is
+  # the race the spec calls out: a naive "re-baseline on close" would swallow this.
+  rm -f "$DIR/pane"
+  printf 'landed before detection\n' >> "$REPO/tracked.txt"
+
+  sh "$HHR_ROOT/scripts/refresh.sh" s1
+  # hhr_build_patch (called before hhr_pane_ensure) picks up the new line, so
+  # combined.patch no longer matches shown.patch byte-for-byte - this must reopen, not
+  # acknowledge.
+  splits=$(grep -c 'pane split' "$HERDR_STUB_LOG" || true)
+  [ "$splits" -eq 2 ]
+  [ -f "$DIR/pane" ]
+  after_baseline="$(jq -r --arg r "$REPO" '.repos[$r].baseline' "$DIR/state.json")"
+  [ "$before_baseline" = "$after_baseline" ]
+  grep -q '^+change' "$DIR/combined.patch"
+  grep -q '^+landed before detection' "$DIR/combined.patch"
+}
+
+@test "close detection re-baselines every tracked repo, not just one" {
+  REPO2="$(make_repo "$SCRATCH/repoB")"
+  BASE2="$(git -C "$REPO2" rev-parse HEAD)"
+  jq --arg r "$REPO2" --arg b "$BASE2" \
+    '.repos[$r] = {baseline:$b, prefix:"repoB"}' "$DIR/state.json" > "$DIR/t" && mv "$DIR/t" "$DIR/state.json"
+  printf 'second repo change\n' >> "$REPO2/tracked.txt"
+
+  stub_closed_pane
+  sh "$HHR_ROOT/scripts/refresh.sh" s1
+  rm -f "$DIR/pane"
+  sh "$HHR_ROOT/scripts/refresh.sh" s1
+
+  [ ! -s "$DIR/combined.patch" ]
+  run git -C "$REPO" diff "$(jq -r --arg r "$REPO" '.repos[$r].baseline' "$DIR/state.json")"
+  [ -z "$output" ]
+  run git -C "$REPO2" diff "$(jq -r --arg r "$REPO2" '.repos[$r].baseline' "$DIR/state.json")"
+  [ -z "$output" ]
+}
+
+@test "a repo whose path contains a space is re-baselined correctly on close detection" {
+  SPACY="$(make_repo "$SCRATCH/repo with space")"
+  BASE_SPACY="$(git -C "$SPACY" rev-parse HEAD)"
+  jq -nc --arg r "$SPACY" --arg b "$BASE_SPACY" \
+    '{repos:{($r):{baseline:$b,prefix:"spacy"}},agents:{}}' > "$DIR/state.json"
+  printf 'spacy change\n' >> "$SPACY/tracked.txt"
+
+  stub_closed_pane
+  sh "$HHR_ROOT/scripts/refresh.sh" s1
+  rm -f "$DIR/pane"
+  sh "$HHR_ROOT/scripts/refresh.sh" s1
+
+  [ ! -s "$DIR/combined.patch" ]
+  run git -C "$SPACY" diff "$(jq -r --arg r "$SPACY" '.repos[$r].baseline' "$DIR/state.json")"
+  [ -z "$output" ]
 }
 
 @test "concurrent refreshes do not corrupt the patch" {

@@ -41,7 +41,12 @@ EOF
 }
 teardown() { teardown_scratch; }
 
-src() { sh -c ". \"$HHR_ROOT/scripts/pane.sh\"; $1" ; }
+# Source in the same order refresh.sh does: hhr_pane_ensure's close-acknowledgment
+# branch calls hhr_reset_repo_baselines (common.sh), hhr_build_patch (patch.sh) and
+# hhr_build_sidecar (sidecar.sh), so a bare `. pane.sh` here would silently no-op those
+# calls ("command not found", swallowed since nothing in this harness runs under
+# `set -e`) and a test could pass for the wrong reason.
+src() { sh -c ". \"$HHR_ROOT/scripts/common.sh\"; . \"$HHR_ROOT/scripts/patch.sh\"; . \"$HHR_ROOT/scripts/sidecar.sh\"; . \"$HHR_ROOT/scripts/pane.sh\"; $1" ; }
 
 @test "viewer command includes agent-notes and watch" {
   run src "hhr_viewer_cmd '$DIR'"
@@ -161,44 +166,59 @@ src() { sh -c ". \"$HHR_ROOT/scripts/pane.sh\"; $1" ; }
   [ "$status" -ne 0 ]
 }
 
-@test "ensure stays closed when the pane is gone and the patch has not changed since it was shown" {
+@test "ensure acknowledges and stays closed when the pane is gone and the patch has not changed since it was shown" {
   export HERDR_ENV=1 HERDR_PANE_ID=w1:p1
   export HHR_TEST_SESSIONS='{"sessions":[]}'
-  mtime="$(src "hhr_patch_mtime '$DIR'")"
-  printf '%s' "$mtime" > "$DIR/shown"
+  # No repos to re-baseline - just enough state.json for hhr_reset_repo_baselines and
+  # hhr_build_patch to run without erroring; the close-acknowledgment flow itself
+  # (against real repos) is covered end-to-end in refresh.bats/baseline.bats.
+  jq -nc '{repos:{},agents:{}}' > "$DIR/state.json"
+  cp "$DIR/combined.patch" "$DIR/shown.patch"
   src "hhr_pane_ensure '$DIR'"
   [ ! -f "$DIR/pane" ]
   run grep -q 'pane split' "$HERDR_STUB_LOG"
   [ "$status" -ne 0 ]
+  # Acknowledged: the patch was rebuilt (zero repos -> empty) and shown.patch dropped.
+  [ ! -s "$DIR/combined.patch" ]
+  [ ! -f "$DIR/shown.patch" ]
 }
 
-@test "ensure reopens and updates shown when the patch changed since it was last shown" {
+@test "ensure reopens and updates shown.patch when the patch changed since it was last shown" {
   export HERDR_ENV=1 HERDR_PANE_ID=w1:p1
   export HHR_TEST_SESSIONS='{"sessions":[]}'
-  printf '1' > "$DIR/shown"
+  printf 'a different patch\n' > "$DIR/shown.patch"
   src "hhr_pane_ensure '$DIR'"
   [ "$(cat "$DIR/pane")" = "w1:p9" ]
   grep -q 'pane split' "$HERDR_STUB_LOG"
-  mtime="$(src "hhr_patch_mtime '$DIR'")"
-  [ "$(cat "$DIR/shown")" = "$mtime" ]
+  run cmp -s "$DIR/combined.patch" "$DIR/shown.patch"
+  [ "$status" -eq 0 ]
 }
 
-@test "ensure refreshes shown to the current mtime when the pane is alive" {
+@test "ensure has no shown.patch to compare against on the very first display, and opens the pane" {
+  export HERDR_ENV=1 HERDR_PANE_ID=w1:p1
+  export HHR_TEST_SESSIONS='{"sessions":[]}'
+  src "hhr_pane_ensure '$DIR'"
+  [ "$(cat "$DIR/pane")" = "w1:p9" ]
+  grep -q 'pane split' "$HERDR_STUB_LOG"
+  run cmp -s "$DIR/combined.patch" "$DIR/shown.patch"
+  [ "$status" -eq 0 ]
+}
+
+@test "ensure refreshes shown.patch to the current content when the pane is alive" {
   export HERDR_ENV=1 HERDR_PANE_ID=w1:p1
   printf 'w1:p9' > "$DIR/pane"
   # HHR_TEST_SESSIONS keeps the setup default: a session matching this DIR, so the
   # viewer reads as alive.
   src "hhr_pane_ensure '$DIR'"
-  mtime="$(src "hhr_patch_mtime '$DIR'")"
-  [ "$(cat "$DIR/shown")" = "$mtime" ]
+  run cmp -s "$DIR/combined.patch" "$DIR/shown.patch"
+  [ "$status" -eq 0 ]
 }
 
-@test "clearing shown (what refresh.sh's force argument does) reopens the pane even when the patch is unchanged" {
+@test "clearing shown.patch (what refresh.sh's force argument does) reopens the pane even when the patch is unchanged" {
   export HERDR_ENV=1 HERDR_PANE_ID=w1:p1
   export HHR_TEST_SESSIONS='{"sessions":[]}'
-  mtime="$(src "hhr_patch_mtime '$DIR'")"
-  printf '%s' "$mtime" > "$DIR/shown"
-  rm -f "$DIR/shown"
+  cp "$DIR/combined.patch" "$DIR/shown.patch"
+  rm -f "$DIR/shown.patch"
   src "hhr_pane_ensure '$DIR'"
   [ "$(cat "$DIR/pane")" = "w1:p9" ]
   grep -q 'pane split' "$HERDR_STUB_LOG"
@@ -222,11 +242,11 @@ src() { sh -c ". \"$HHR_ROOT/scripts/pane.sh\"; $1" ; }
   [ -z "$output" ]
 }
 
-@test "cleanup.sh removes the shown marker along with the pane file" {
+@test "cleanup.sh removes the shown.patch marker along with the pane file" {
   export HERDR_ENV=1
   printf 'w1:p9' > "$DIR/pane"
-  printf '12345' > "$DIR/shown"
+  cp "$DIR/combined.patch" "$DIR/shown.patch"
   run sh -c 'printf "%s" "$1" | sh "$2/scripts/cleanup.sh"' _ "$(session_end_payload s1)" "$HHR_ROOT"
   [ "$status" -eq 0 ]
-  [ ! -f "$DIR/shown" ]
+  [ ! -f "$DIR/shown.patch" ]
 }

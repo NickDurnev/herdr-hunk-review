@@ -72,3 +72,30 @@ hhr_lock() {
 }
 
 hhr_unlock() { rm -rf "$1/.lock"; }
+
+# Re-snapshot every tracked repo's baseline to its current working state, and clear
+# stored agent notes - the shared core of "acknowledge everything shown so far".
+# Shared by baseline.sh (/hunk-baseline) and hhr_pane_ensure's pane-close
+# acknowledgment path, so both take an identical snapshot instead of drifting apart as
+# two copies. Deliberately does NOT lock: baseline.sh locks around its own call, and
+# hhr_pane_ensure runs inside refresh.sh's lock already - locking again here would
+# deadlock against the caller's own held lock instead of merely being redundant.
+#
+# A bare `for root in $(jq ...)` word-splits on spaces in the repo path; read the
+# keys from a file instead, one per line, like hhr_build_patch does.
+hhr_reset_repo_baselines() {
+  dir="$1"
+  state="$dir/state.json"
+  [ -f "$state" ] || return 0
+  reposlist="$dir/.baseline.repos.tmp"
+  jq -r '.repos | keys[]' "$state" > "$reposlist"
+  while IFS= read -r root; do
+    [ -d "$root" ] || continue
+    base=$(git -C "$root" stash create 2>/dev/null) || base=
+    [ -n "$base" ] || base=$(git -C "$root" rev-parse HEAD 2>/dev/null) || continue
+    jq --arg r "$root" --arg b "$base" '.repos[$r].baseline = $b' "$state" > "$state.tmp" && mv "$state.tmp" "$state"
+  done < "$reposlist"
+  rm -f "$reposlist"
+  jq '.agents = {}' "$state" > "$state.tmp" && mv "$state.tmp" "$state"
+  return 0
+}

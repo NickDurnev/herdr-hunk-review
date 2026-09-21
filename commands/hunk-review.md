@@ -10,10 +10,17 @@ use the most recently modified one. Substitute it for `<session_id>` below.
 sh "${CLAUDE_PLUGIN_ROOT}/scripts/refresh.sh" "<session_id>" force
 ```
 
-The `force` argument makes this always open the pane, even if the user closed it and
-nothing has changed since.
+The `force` argument makes this bypass the "user closed it deliberately" check, so a
+closed pane reopens even though nothing changed since it was closed. It does NOT
+override the separate empty-patch guard: if there is nothing to show at all (for
+example, right after the user closed the pane and the plugin acknowledged it, or right
+after `/hunk-baseline`), no pane opens - there would be nothing in it to show.
 
-Then report one line: how many files and repos the patch contains.
+Then report one line:
+- If `<dir>/combined.patch` is empty or missing: say there are no changes to review
+  since the last acknowledgment, and no pane was opened - closing the pane acknowledges
+  its diff, so this usually just means everything so far has already been acknowledged.
+- Otherwise: how many files and repos the patch contains.
 
 If `HERDR_ENV` is not `1`, also print the command the user should run in another
 terminal, with the real session directory filled in for `<dir>`:

@@ -1,9 +1,11 @@
 #!/bin/sh
 # Regenerate the patch and sidecar, then make sure a viewer is showing them.
 # Usage: refresh.sh <session_id> [force]
-# `force` clears the "shown" marker first, so a pane the user closed reopens
-# unconditionally - this is how /hunk-review always opens the pane, regardless of
-# whether anything changed since it was closed.
+# `force` clears the "shown.patch" marker before hhr_pane_ensure runs, so a pane the
+# user closed reopens regardless of whether anything changed since it was closed - this
+# is how /hunk-review always opens the pane when there is something to show. It does
+# NOT override the separate empty-patch guard below: with nothing to show (every repo
+# at its baseline), no pane opens, forced or not.
 set -e
 here="$(dirname "$0")"
 . "$here/common.sh"
@@ -27,6 +29,12 @@ trap "hhr_unlock '$dir'" EXIT INT TERM
 
 hhr_build_patch "$dir"
 hhr_build_sidecar "$dir"
+# The empty-patch guard. `force` NEVER bypasses this - it exists to defeat the
+# `shown.patch` marker below, not this check. An empty patch means every tracked repo
+# is at its baseline (most commonly: the close-acknowledgment path in hhr_pane_ensure
+# just ran, or /hunk-baseline just ran), so there is nothing to put in a pane; keep
+# this as its own early exit rather than folding it into the `force` condition below,
+# or a later change to one will silently change the other.
 [ -s "$dir/combined.patch" ] || exit 0
 
 if [ "$(jq -r '.watch_stalled // false' "$dir/state.json" 2>/dev/null)" = "true" ]; then
@@ -41,7 +49,11 @@ if [ "$(jq -r '.watch_stalled // false' "$dir/state.json" 2>/dev/null)" = "true"
   jq '.watch_stalled = false' "$dir/state.json" > "$dir/.s.tmp" && mv "$dir/.s.tmp" "$dir/state.json"
 fi
 
-[ "$force" = "force" ] && rm -f "$dir/shown"
+# The shown.patch guard. This is the ONLY thing `force` bypasses: it clears
+# shown.patch so hhr_pane_ensure cannot read "pane gone AND content == shown.patch" and
+# treat the closed pane as acknowledged - by this point the empty-patch guard above has
+# already vouched that there is real content to show.
+[ "$force" = "force" ] && rm -f "$dir/shown.patch"
 hhr_pane_ensure "$dir"
 
 # Detect a watch that is not reloading: the live session should be no older than the patch.

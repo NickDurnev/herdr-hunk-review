@@ -99,12 +99,36 @@ To work from a local checkout instead, point the first command at the directory:
 Nothing else is required: the hooks register themselves, and the pane appears the first
 time the session changes a file in a git repository.
 
+## Closing the pane
+
+Closing the pane is not a neutral act — it means "I have reviewed this; don't show it to
+me again." The plugin only notices the pane is gone on the *next* refresh (closing isn't
+intercepted directly, so this can lag by one refresh cycle), and when it does, provided
+nothing new landed in the meantime, it resets the baseline for every tracked repo — the
+same reset `/hunk-baseline` does. The acknowledged work then drops out of the diff, and
+the pane stays shut until new work shows up, at which point it reopens on its own.
+
+Nothing is discarded. The changes themselves are untouched in your working tree and in
+git — closing only forgets that the plugin's own pane already showed them to you. You can
+always diff them by hand (`git diff <old-baseline>`, `git log`, or any other tool),
+whether or not the pane remembers to show them again.
+
+If new work lands between the pane's last display and the plugin noticing it was closed,
+that work is never silently acknowledged — the pane reopens instead, showing everything,
+including the part that would otherwise have been swallowed. The check is exact: only a
+patch that is byte-for-byte identical to what was last shown gets acknowledged; anything
+else reopens the pane.
+
+`/hunk-baseline` does the same acknowledgment explicitly, on demand, without requiring you
+to close the pane first — useful when you want to mark everything as reviewed but keep
+watching for what comes next.
+
 ## Commands
 
 | Command | Does |
 |---|---|
-| `/hunk-review` | Refreshes the pane immediately and opens it if it isn't already open. |
-| `/hunk-baseline` | Resets the diff baseline, so the pane shows only changes made from that point on. |
+| `/hunk-review` | Refreshes the pane immediately and opens it if there is anything to show and it isn't already open. If everything so far has already been acknowledged (see [Closing the pane](#closing-the-pane)), it reports that instead of opening an empty pane. |
+| `/hunk-baseline` | Acknowledges everything the pane currently shows and resets the diff baseline, without closing the pane — the same acknowledgment that happens automatically when you close the pane yourself, done explicitly. |
 | `/hunk-pause` | Toggles automatic refreshing on and off for the current session. |
 
 ## Using it outside herdr
@@ -157,13 +181,18 @@ run `/hunk-review` to reopen it.
 the pane refresh is, so nothing edited while paused is lost once you resume.
 
 **I closed the pane and it came back anyway.** It shouldn't, as long as nothing new
-landed: `hhr_pane_ensure` remembers the patch's write time in a `shown` marker the moment
-a pane is opened (or reused), and when the pane is gone it compares that marker against
-the patch's current write time before reopening anything. Unchanged mtime means the user
-closed it deliberately and it stays closed; a changed mtime means new code landed and it
-reopens automatically. `/hunk-baseline` and `/hunk-pause` never touch this — only
-`/hunk-review` bypasses it (via `refresh.sh session_id force`), so that command always
-opens the pane regardless of the marker.
+landed: `hhr_pane_ensure` keeps a copy of the patch as `shown.patch` the moment a pane is
+opened (or reused), and when the pane is gone it byte-for-byte compares that copy against
+the current patch before deciding what to do (a copy, not a timestamp — a write-time
+comparison can't tell two rewrites inside the same second apart, so it isn't trustworthy
+here). An identical patch means the user closed it deliberately and nothing landed since
+— see [Closing the pane](#closing-the-pane): the plugin acknowledges it (resets the
+baseline, same as `/hunk-baseline`) and it stays closed. A different patch means new code
+landed, so it is never acknowledged and the pane reopens automatically instead.
+`/hunk-pause` never touches this — only `/hunk-review` bypasses the `shown.patch` check
+(via `refresh.sh session_id force`), reopening the pane whenever there is something to
+show; if there is genuinely nothing to show (every repo already at its baseline), `/hunk-review`
+reports that instead of opening an empty pane.
 
 **Inspecting the raw hook payload.** Set `HHR_DEBUG_PAYLOAD=1` in the environment
 Claude Code's hooks run in, reproduce the scenario you're debugging, then inspect
