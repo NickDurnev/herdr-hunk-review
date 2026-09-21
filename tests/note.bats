@@ -100,6 +100,10 @@ $line3"
   [ -z "$output" ]
   [ "$(jq -r '.agents.a1.output'      "$DIR/state.json")" = "" ]
   [ "$(jq -r '.agents.a1.note_source' "$DIR/state.json")" = "none" ]
+  # note_source:none must still be recorded - it's the diagnostic signal that
+  # extraction was attempted and failed, not silence that could mean anything.
+  # And track.sh's files array (seeded in setup()) must survive untouched.
+  [ "$(jq -r '.agents.a1.files[0]' "$DIR/state.json")" = "$REPO/tracked.txt" ]
 }
 
 @test "malformed transcript JSON degrades to no note, silently" {

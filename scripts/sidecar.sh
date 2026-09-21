@@ -74,10 +74,11 @@ hhr_build_sidecar() {
     [.repos | to_entries[] | {root: .key, prefix: .value.prefix}] as $repos
     | .agents | to_entries[]
     | . as $a
-    # A main-agent record that neither track.sh nor note.sh ever filled in beyond the
-    # seeded placeholder (type "" and output "") has no report at all - skip it rather
-    # than emit an empty "[] no report" annotation on every file it touched.
-    | select((($a.value.type // "") != "") or (($a.value.output // "") != ""))
+    # An agent with no captured report text - the seeded placeholder, a populated
+    # type whose output/transcript extraction came up empty, or anything else with
+    # nothing to say - has nothing worth annotating. Skip it rather than emit a
+    # "[type] no report" box that carries zero information on every file it touched.
+    | select(($a.value.output // "") | test("[^ \t\r\n]"))
     | ($a.value.files // [])[]
     | . as $f
     | ($repos[] | . as $rr | select($f | startswith($rr.root + "/")) | $rr) as $r
@@ -115,7 +116,7 @@ hhr_build_sidecar() {
                   summary: ($ns | map(.type) | unique | join(", ")),
                   annotations: ($ns | map(
                     {
-                      summary: ("[" + .type + "] " + (if (.text | length) > 0 then .text else "no report" end))
+                      summary: ("[" + .type + "] " + .text)
                     }
                     + (if $an.side == "new"
                        then {newRange: [$an.line, $an.line]}

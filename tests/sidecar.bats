@@ -80,12 +80,61 @@ EOF
   [ "$(jq -r '.files | length' "$DIR/agent-context.json")" -eq 0 ]
 }
 
-@test "falls back to the agent type when output is empty" {
+@test "an agent with a type but no report text produces no annotation" {
+  # A populated type with empty output (extraction ran, found nothing) must not
+  # render a "[reviewer] no report" box - there is no case where "no report" is
+  # worth showing, so a file whose only contributor has no text is dropped
+  # entirely rather than rendered with a placeholder annotation.
   write_state "$(jq -nc --arg f "/x/repoA/tracked.txt" \
     '{repos:{"/x/repoA":{baseline:"b",prefix:"repoA"}},
       agents:{a1:{type:"reviewer",output:"",files:[$f]}}}')"
   build
+  [ "$(jq -r '.files | length' "$DIR/agent-context.json")" -eq 0 ]
+  run grep -c "no report" "$DIR/agent-context.json"
+  [ "$status" -ne 0 ]
+}
+
+@test "an agent with report text still produces an annotation" {
+  write_state "$(jq -nc --arg f "/x/repoA/tracked.txt" \
+    '{repos:{"/x/repoA":{baseline:"b",prefix:"repoA"}},
+      agents:{a1:{type:"reviewer",output:"looked good",files:[$f]}}}')"
+  build
+  [ "$(jq -r '.files | length' "$DIR/agent-context.json")" -eq 1 ]
   jq -e '.files[0].annotations[0].summary | test("reviewer")' "$DIR/agent-context.json"
+  jq -e '.files[0].annotations[0].summary | test("looked good")' "$DIR/agent-context.json"
+}
+
+@test "two agents on one file, one with text and one without, yields exactly one annotation" {
+  write_state "$(jq -nc --arg f "/x/repoA/tracked.txt" \
+    '{repos:{"/x/repoA":{baseline:"b",prefix:"repoA"}},
+      agents:{a1:{type:"impl",output:"",files:[$f]},
+              a2:{type:"reviewer",output:"looks fine",files:[$f]}}}')"
+  build
+  [ "$(jq -r '.files | length' "$DIR/agent-context.json")" -eq 1 ]
+  [ "$(jq -r '.files[0].annotations | length' "$DIR/agent-context.json")" -eq 1 ]
+  jq -e '.files[0].annotations[0].summary | test("reviewer")' "$DIR/agent-context.json"
+}
+
+@test "no report text anywhere in the sidecar output, regardless of agent mix" {
+  write_state "$(jq -nc --arg f "/x/repoA/tracked.txt" \
+    '{repos:{"/x/repoA":{baseline:"b",prefix:"repoA"}},
+      agents:{a1:{type:"impl",output:"",files:[$f]},
+              a2:{type:"",output:"",files:[$f]},
+              a3:{type:"reviewer",output:"looks fine",files:[$f]}}}')"
+  build
+  run grep -c "no report" "$DIR/agent-context.json"
+  [ "$status" -ne 0 ]
+}
+
+@test "a file whose only contributor has no text still appears in combined.patch" {
+  # Note suppression is an agent-context.json (annotation) concern only - the diff
+  # itself must be unaffected by whether any agent had something to say about it.
+  write_state "$(jq -nc --arg f "/x/repoA/tracked.txt" \
+    '{repos:{"/x/repoA":{baseline:"b",prefix:"repoA"}},
+      agents:{a1:{type:"impl",output:"",files:[$f]}}}')"
+  build
+  [ "$(jq -r '.files | length' "$DIR/agent-context.json")" -eq 0 ]
+  grep -q "^diff --git a/repoA/tracked.txt b/repoA/tracked.txt$" "$DIR/combined.patch"
 }
 
 @test "truncates a very long output" {

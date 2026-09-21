@@ -167,8 +167,12 @@ annotation — a file-level summary alone renders nothing. If a subagent's note 
 be attached at all — an unexpected `agent_id` field, or both `agent_output` and the
 transcript fallback coming up empty (see [Where agent notes come from](#where-agent-notes-come-from)
 below, and check `note_source` in `state.json`) — the result is no note on that file,
-not a degraded one — `note.sh` exits before writing anything when `agent_id` is
-missing. The diff itself is unaffected either way.
+not a degraded one. This holds however the note went missing: `note.sh` exits before
+writing anything when `agent_id` is missing, and `sidecar.sh` never emits an annotation
+for an agent that has no captured report text (a populated `type` with empty `output`,
+or the placeholder `track.sh` seeds before any hook has filled it in) — a subagent
+with nothing to say produces no note, never an empty or placeholder one. The diff
+itself is unaffected either way.
 
 **The pane stops updating.** `refresh.sh` detects a stalled watch by comparing the
 patch's write time against the live session's last-updated timestamp reported by
