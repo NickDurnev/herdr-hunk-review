@@ -78,12 +78,16 @@ bash-only or GNU-only constructs.
 
 ## Installation
 
-In Claude Code:
+In Claude Code, run **both** commands, in this order:
 
 ```
 /plugin marketplace add NickDurnev/herdr-hunk-review
 /plugin install herdr-hunk-review@nickdurnev
 ```
+
+The first registers this repo as a plugin marketplace; the second installs from it.
+Running only the second gives `Marketplace "nickdurnev" not found` — `/plugin install`
+resolves names that are already registered, it does not fetch them.
 
 To work from a local checkout instead, point the first command at the directory:
 
