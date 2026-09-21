@@ -16,8 +16,10 @@ session=$(printf '%s' "$payload" | hhr_json_get session_id)
 # Read-only: never mkdir here (hhr_state_dir would), a torn-down session has nothing
 # left to create.
 dir="$(hhr_state_root)/$session"
-[ -f "$dir/pane" ] || exit 0
-command -v herdr >/dev/null 2>&1 || { rm -f "$dir/pane"; exit 0; }
+# `shown` outlives the pane by design (it's how a closed pane stays closed across
+# refreshes), but the session itself is ending, so nothing should be left behind.
+[ -f "$dir/pane" ] || { rm -f "$dir/shown"; exit 0; }
+command -v herdr >/dev/null 2>&1 || { rm -f "$dir/pane" "$dir/shown"; exit 0; }
 
 pane=$(cat "$dir/pane" 2>/dev/null) || exit 0
 if [ -n "$pane" ]; then
@@ -25,5 +27,5 @@ if [ -n "$pane" ]; then
   herdr pane send-keys "$pane" q >/dev/null 2>&1 || true
   herdr pane close "$pane" >/dev/null 2>&1 || true
 fi
-rm -f "$dir/pane"
+rm -f "$dir/pane" "$dir/shown"
 exit 0

@@ -68,6 +68,57 @@ teardown() { teardown_scratch; }
   [ ! -f "$DIR/pane" ]
 }
 
+@test "a trailing force argument does not disturb an ordinary refresh with HERDR_ENV unset" {
+  unset HERDR_ENV
+  run sh "$HHR_ROOT/scripts/refresh.sh" s1 force
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ -s "$DIR/combined.patch" ]
+}
+
+@test "force reopens a pane the user closed even though nothing changed since; a plain refresh does not" {
+  STUB="$SCRATCH/bin"; mkdir -p "$STUB"; export PATH="$STUB:$PATH"
+  cat > "$STUB/hunk" <<'EOF'
+#!/bin/sh
+[ "$1 $2" = "session list" ] && echo '{"sessions":[]}'
+exit 0
+EOF
+  chmod +x "$STUB/hunk"
+  cat > "$STUB/herdr" <<'EOF'
+#!/bin/sh
+echo "$@" >> "$HERDR_STUB_LOG"
+case "$1 $2" in
+  "pane list")   echo '{"result":{"panes":[]}}' ;;
+  "pane layout") echo '{"result":{"layout":{"area":{"width":120,"height":40}}}}' ;;
+  "pane split")  echo '{"result":{"pane":{"pane_id":"w1:p1"}}}' ;;
+  *) echo '{"result":{}}' ;;
+esac
+EOF
+  chmod +x "$STUB/herdr"
+  export HERDR_STUB_LOG="$SCRATCH/herdr.log"; : > "$HERDR_STUB_LOG"
+  export HERDR_ENV=1
+
+  # First refresh: no pane, no shown marker yet -> opens one.
+  sh "$HHR_ROOT/scripts/refresh.sh" s1
+  first_splits=$(grep -c 'pane split' "$HERDR_STUB_LOG" || true)
+  [ "$first_splits" -eq 1 ]
+  [ -f "$DIR/shown" ]
+
+  # User closes the pane (herdr's stubbed "pane list" already always reports none);
+  # nothing else changes. A plain refresh must NOT reopen it.
+  rm -f "$DIR/pane"
+  sh "$HHR_ROOT/scripts/refresh.sh" s1
+  second_splits=$(grep -c 'pane split' "$HERDR_STUB_LOG" || true)
+  [ "$second_splits" -eq 1 ]
+  [ ! -f "$DIR/pane" ]
+
+  # /hunk-review's force argument must reopen it regardless.
+  sh "$HHR_ROOT/scripts/refresh.sh" s1 force
+  third_splits=$(grep -c 'pane split' "$HERDR_STUB_LOG" || true)
+  [ "$third_splits" -eq 2 ]
+  [ -f "$DIR/pane" ]
+}
+
 @test "concurrent refreshes do not corrupt the patch" {
   sh "$HHR_ROOT/scripts/refresh.sh" s1 &
   sh "$HHR_ROOT/scripts/refresh.sh" s1 &

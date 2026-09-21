@@ -7,8 +7,11 @@ the state root, then list directories under it. If exactly one exists, use it; o
 use the most recently modified one. Substitute it for `<session_id>` below.
 
 ```bash
-sh "${CLAUDE_PLUGIN_ROOT}/scripts/refresh.sh" "<session_id>"
+sh "${CLAUDE_PLUGIN_ROOT}/scripts/refresh.sh" "<session_id>" force
 ```
+
+The `force` argument makes this always open the pane, even if the user closed it and
+nothing has changed since.
 
 Then report one line: how many files and repos the patch contains.
 

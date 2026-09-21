@@ -1,6 +1,9 @@
 #!/bin/sh
 # Regenerate the patch and sidecar, then make sure a viewer is showing them.
-# Usage: refresh.sh <session_id>
+# Usage: refresh.sh <session_id> [force]
+# `force` clears the "shown" marker first, so a pane the user closed reopens
+# unconditionally - this is how /hunk-review always opens the pane, regardless of
+# whether anything changed since it was closed.
 set -e
 here="$(dirname "$0")"
 . "$here/common.sh"
@@ -9,6 +12,7 @@ here="$(dirname "$0")"
 . "$here/pane.sh"
 
 session="$1"
+force="$2"
 [ -n "$session" ] || exit 0
 dir="$(hhr_state_dir "$session")" || exit 0
 hhr_guard "$dir"
@@ -37,12 +41,13 @@ if [ "$(jq -r '.watch_stalled // false' "$dir/state.json" 2>/dev/null)" = "true"
   jq '.watch_stalled = false' "$dir/state.json" > "$dir/.s.tmp" && mv "$dir/.s.tmp" "$dir/state.json"
 fi
 
+[ "$force" = "force" ] && rm -f "$dir/shown"
 hhr_pane_ensure "$dir"
 
 # Detect a watch that is not reloading: the live session should be no older than the patch.
 sid="$(hhr_session_id "$dir")"
 if [ -n "$sid" ]; then
-  patch_mtime=$(stat -f %m "$dir/combined.patch" 2>/dev/null || stat -c %Y "$dir/combined.patch" 2>/dev/null || echo 0)
+  patch_mtime=$(hhr_patch_mtime "$dir")
   updated=$(hunk session list --json 2>/dev/null \
             | jq -r --arg s "$sid" '.sessions[] | select(.sessionId == $s) | .snapshot.updatedAt // empty')
   if [ -n "$updated" ]; then

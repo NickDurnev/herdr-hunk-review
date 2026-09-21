@@ -9,6 +9,10 @@ hhr_pane_alive() {
   herdr pane list 2>/dev/null | jq -e --arg p "$1" '[.result.panes[].pane_id] | index($p)' >/dev/null 2>&1
 }
 
+hhr_patch_mtime() {
+  stat -f %m "$1/combined.patch" 2>/dev/null || stat -c %Y "$1/combined.patch" 2>/dev/null || echo 0
+}
+
 hhr_pane_ensure() {
   dir="$1"
   [ "${HERDR_ENV:-}" = 1 ] || return 0
@@ -16,14 +20,27 @@ hhr_pane_ensure() {
   command -v hunk  >/dev/null 2>&1 || return 0
   [ -s "$dir/combined.patch" ] || return 0
 
+  mtime=$(hhr_patch_mtime "$dir")
+
   if [ -f "$dir/pane" ] && hhr_pane_alive "$(cat "$dir/pane")"; then
     # A pane can exist but be an empty shell if the hunk process inside it already
     # exited (crash, `q`, `hunk session` reaped). A live patch session is the signal
     # the viewer is actually running, so check that before trusting the pane.
     if [ -n "$(hhr_session_id "$dir")" ]; then
+      printf '%s' "$mtime" > "$dir/shown"
       return 0
     fi
     hhr_pane_restart "$dir"
+    printf '%s' "$mtime" > "$dir/shown"
+    return 0
+  fi
+
+  # The pane is gone. patch.sh only rewrites combined.patch (and moves its mtime) when
+  # the diff content actually changed, so an unchanged mtime since it was last shown
+  # means the user closed the pane deliberately and nothing new has landed - stay
+  # closed. A changed mtime (or no recorded "shown" at all) means either new content
+  # landed or the pane has never been opened, so fall through and (re)open it.
+  if [ -f "$dir/shown" ] && [ "$(cat "$dir/shown" 2>/dev/null)" = "$mtime" ]; then
     return 0
   fi
 
@@ -42,6 +59,7 @@ hhr_pane_ensure() {
   [ -n "$pane" ] || return 0
   printf '%s' "$pane" > "$dir/pane"
   herdr pane run "$pane" "$(hhr_viewer_cmd "$dir")" >/dev/null 2>&1 || true
+  printf '%s' "$mtime" > "$dir/shown"
   return 0
 }
 

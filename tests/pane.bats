@@ -161,6 +161,49 @@ src() { sh -c ". \"$HHR_ROOT/scripts/pane.sh\"; $1" ; }
   [ "$status" -ne 0 ]
 }
 
+@test "ensure stays closed when the pane is gone and the patch has not changed since it was shown" {
+  export HERDR_ENV=1 HERDR_PANE_ID=w1:p1
+  export HHR_TEST_SESSIONS='{"sessions":[]}'
+  mtime="$(src "hhr_patch_mtime '$DIR'")"
+  printf '%s' "$mtime" > "$DIR/shown"
+  src "hhr_pane_ensure '$DIR'"
+  [ ! -f "$DIR/pane" ]
+  run grep -q 'pane split' "$HERDR_STUB_LOG"
+  [ "$status" -ne 0 ]
+}
+
+@test "ensure reopens and updates shown when the patch changed since it was last shown" {
+  export HERDR_ENV=1 HERDR_PANE_ID=w1:p1
+  export HHR_TEST_SESSIONS='{"sessions":[]}'
+  printf '1' > "$DIR/shown"
+  src "hhr_pane_ensure '$DIR'"
+  [ "$(cat "$DIR/pane")" = "w1:p9" ]
+  grep -q 'pane split' "$HERDR_STUB_LOG"
+  mtime="$(src "hhr_patch_mtime '$DIR'")"
+  [ "$(cat "$DIR/shown")" = "$mtime" ]
+}
+
+@test "ensure refreshes shown to the current mtime when the pane is alive" {
+  export HERDR_ENV=1 HERDR_PANE_ID=w1:p1
+  printf 'w1:p9' > "$DIR/pane"
+  # HHR_TEST_SESSIONS keeps the setup default: a session matching this DIR, so the
+  # viewer reads as alive.
+  src "hhr_pane_ensure '$DIR'"
+  mtime="$(src "hhr_patch_mtime '$DIR'")"
+  [ "$(cat "$DIR/shown")" = "$mtime" ]
+}
+
+@test "clearing shown (what refresh.sh's force argument does) reopens the pane even when the patch is unchanged" {
+  export HERDR_ENV=1 HERDR_PANE_ID=w1:p1
+  export HHR_TEST_SESSIONS='{"sessions":[]}'
+  mtime="$(src "hhr_patch_mtime '$DIR'")"
+  printf '%s' "$mtime" > "$DIR/shown"
+  rm -f "$DIR/shown"
+  src "hhr_pane_ensure '$DIR'"
+  [ "$(cat "$DIR/pane")" = "w1:p9" ]
+  grep -q 'pane split' "$HERDR_STUB_LOG"
+}
+
 @test "cleanup.sh sends q before close, and removes the pane file" {
   export HERDR_ENV=1
   printf 'w1:p9' > "$DIR/pane"
@@ -177,4 +220,13 @@ src() { sh -c ". \"$HHR_ROOT/scripts/pane.sh\"; $1" ; }
   run sh -c 'printf "%s" "$1" | sh "$2/scripts/cleanup.sh"' _ "$(session_end_payload s1)" "$HHR_ROOT"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+}
+
+@test "cleanup.sh removes the shown marker along with the pane file" {
+  export HERDR_ENV=1
+  printf 'w1:p9' > "$DIR/pane"
+  printf '12345' > "$DIR/shown"
+  run sh -c 'printf "%s" "$1" | sh "$2/scripts/cleanup.sh"' _ "$(session_end_payload s1)" "$HHR_ROOT"
+  [ "$status" -eq 0 ]
+  [ ! -f "$DIR/shown" ]
 }
