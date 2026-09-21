@@ -44,11 +44,31 @@ post_tool_payload() {
       tool_name:"Edit", tool_input:{file_path:$f}}'
 }
 
-# Emits a SubagentStop payload: session_id, agent_id, agent_type, agent_output
+# Emits a SubagentStop payload: session_id, agent_id, agent_type, agent_output,
+# [transcript_path] (optional - omitted callers get no transcript_path field, matching
+# a harness that doesn't send one)
 subagent_stop_payload() {
-  jq -nc --arg s "$1" --arg a "$2" --arg t "$3" --arg o "$4" \
+  jq -nc --arg s "$1" --arg a "$2" --arg t "$3" --arg o "$4" --arg tp "${5:-}" \
     '{session_id:$s, agent_id:$a, agent_type:$t, agent_output:$o,
-      hook_event_name:"SubagentStop"}'
+      hook_event_name:"SubagentStop"}
+     + (if $tp != "" then {transcript_path:$tp} else {} end)'
+}
+
+# Writes a fixture subagent transcript JSONL file at the path note.sh derives from
+# (transcript_path, session_id, agent_id): dirname(transcript_path)/session/subagents/
+# agent-<id>.jsonl. $4 is the raw file content (each line a JSON object), written
+# verbatim so tests can construct malformed content too.
+write_subagent_transcript() {
+  transcript_path="$1" session="$2" agent="$3" content="$4"
+  d="$(dirname "$transcript_path")/$session/subagents"
+  mkdir -p "$d"
+  printf '%s' "$content" > "$d/agent-$agent.jsonl"
+}
+
+# Builds one assistant transcript record with a single text content block, as one
+# JSONL line (no trailing newline - callers join lines themselves).
+assistant_text_record() {
+  jq -nc --arg t "$1" '{type:"assistant", message:{content:[{type:"text", text:$t}]}}'
 }
 
 # Emits a SessionEnd payload: session_id

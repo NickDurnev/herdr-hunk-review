@@ -1,5 +1,8 @@
 # Sourced, not executed. POSIX sh; bash 3.2 compatible.
 HHR_LOCK_STALE_SECONDS=30
+# Shared by note.sh (writes agent notes into state.json) and sidecar.sh (renders them
+# into agent-context.json) - one constant, not two, so the two never drift apart.
+HHR_NOTE_MAX_CHARS=300
 
 hhr_have() { command -v "$1" >/dev/null 2>&1; }
 

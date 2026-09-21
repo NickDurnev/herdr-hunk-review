@@ -18,7 +18,7 @@ EOF
 teardown() { teardown_scratch; }
 
 write_state() { printf '%s' "$1" > "$DIR/state.json"; }
-build() { sh -c '. "$1/scripts/sidecar.sh"; hhr_build_sidecar "$2"' _ "$HHR_ROOT" "$DIR"; }
+build() { sh -c '. "$1/scripts/common.sh"; . "$1/scripts/sidecar.sh"; hhr_build_sidecar "$2"' _ "$HHR_ROOT" "$DIR"; }
 
 @test "emits a ranged annotation anchored to the first added line" {
   write_state "$(jq -nc --arg f "/x/repoA/tracked.txt" \

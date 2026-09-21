@@ -1,5 +1,6 @@
 # Sourced. Builds <state_dir>/agent-context.json from state.json and combined.patch.
-HHR_NOTE_MAX_CHARS=300
+# HHR_NOTE_MAX_CHARS is defined in common.sh (shared with note.sh); callers must
+# source common.sh before this file.
 
 # Prints "<prefixed-path>\t<side>\t<line>" for every file in the patch. The anchor
 # prefers the first ADDED line (the common replace-one-line shape is "-old" then

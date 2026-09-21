@@ -164,10 +164,11 @@ way; see [Using it outside herdr](#using-it-outside-herdr).
 **Notes aren't rendering.** Two separate requirements have to both hold: the viewer
 must be started with `--agent-notes`, and the sidecar needs at least one *ranged*
 annotation — a file-level summary alone renders nothing. If a subagent's note couldn't
-be attached at all (an unexpected `agent_id`/`agent_type`/`agent_output` field, for
-instance — see [Observed payloads](#observed-payloads) below), the result is no note on
-that file, not a degraded one — `note.sh` exits before writing anything when `agent_id`
-is missing. The diff itself is unaffected either way.
+be attached at all — an unexpected `agent_id` field, or both `agent_output` and the
+transcript fallback coming up empty (see [Where agent notes come from](#where-agent-notes-come-from)
+below, and check `note_source` in `state.json`) — the result is no note on that file,
+not a degraded one — `note.sh` exits before writing anything when `agent_id` is
+missing. The diff itself is unaffected either way.
 
 **The pane stops updating.** `refresh.sh` detects a stalled watch by comparing the
 patch's write time against the live session's last-updated timestamp reported by
@@ -202,17 +203,46 @@ line per hook invocation that ran while the flag was set). Currently wired into
 `agent_id`/`agent_type`/`agent_output` fields this plugin depends on. It is a complete
 no-op — no file touched, no output — whenever the variable is unset.
 
-## Observed payloads
+## Where agent notes come from
 
 The field names this plugin reads off hook payloads — `agent_id`, `agent_type`,
-`agent_output` — come from Claude Code's documentation. A real `SubagentStop` payload
-has since been observed: `agent_id` is populated as expected, but `agent_type` and
-`agent_output` arrive **present and empty** (`""`, not absent — the `// "agent"` and
-`// ""` fallbacks in `note.sh` exist for a missing field, not an empty one). In
-practice this means `note.sh` still records an entry per subagent, but with an empty
-type and no note text to show — the agent-notes feature is effectively inert in real use
-until a different source for that text is wired in, which is a deliberate follow-up
-decision, not something this plugin does on its own. Use `HHR_DEBUG_PAYLOAD=1` (see
+`agent_output` — come from Claude Code's documentation, and have since been verified
+against 104 real subagents across two live sessions:
+
+- `agent_id` is populated and correct every time. `note.sh` keys every note by it.
+- `agent_type` is populated *sometimes* (it carries the subagent type, e.g.
+  `general-purpose`); the `// "agent"` fallback in `note.sh` covers the rest.
+- `agent_output` — documented as the subagent's closing report — is **always empty**
+  in practice. The text simply isn't on the payload.
+
+So the closing report `note.sh` attaches to each hunk does not come from
+`agent_output`. When that field is empty, `note.sh` falls back to the subagent's own
+transcript: the harness writes one JSONL file per subagent, at a path derived
+entirely from fields already on the payload —
+`dirname(transcript_path)/<session_id>/subagents/agent-<agent_id>.jsonl` — and the
+note is the text of the last assistant record in that file (read from a bounded tail,
+not the whole file — see the comment in `note.sh`).
+
+**This reads a harness-internal layout, not a documented contract.** If a future
+harness version changes where or how subagent transcripts are written, this
+extraction can silently stop working. It is built to degrade, never to error: every
+failure mode — no `transcript_path`, no transcript file at the derived path, malformed
+JSON in it, no assistant text in it — falls back to exactly today's behavior (no note
+on that file) and never raises. Because of that, a broken extraction and "nothing to
+report" look identical from the diff pane alone.
+
+To tell them apart, check `.agents["<agent_id>"].note_source` in the session's
+`state.json` (under `hhr_state_root`, per-session — see `common.sh`). It's one of:
+
+| `note_source` | Meaning |
+|---|---|
+| `payload` | `agent_output` was non-empty and used directly (preferred whenever it's there — costs nothing, and is forward-compatible if the harness starts populating it). |
+| `transcript` | `agent_output` was empty; the note came from the subagent transcript fallback above. |
+| `none` | Neither source produced text — the harness layout may have changed, or the subagent genuinely left no closing report. |
+
+If notes that used to show up stop appearing, check `note_source` first: `none` across
+the board (where you'd expect `transcript`) points at a harness layout change, not a
+regression in the subagents themselves. Use `HHR_DEBUG_PAYLOAD=1` (see
 [Troubleshooting](#troubleshooting)) to capture the exact payload shape in your own
 session before deciding what to change. Every read defaults safely regardless (see
 `common.sh`'s `hhr_json_get` and the `// empty` / `// "agent"` fallbacks throughout the
@@ -233,5 +263,5 @@ Ordinary commits never touch the version — only a release does, via `bump.sh`.
 
 ## Tests
 
-Requires `bats-core`: `brew install bats-core`. Then `bats tests/` — 98 tests, all
+Requires `bats-core`: `brew install bats-core`. Then `bats tests/` — 115 tests, all
 passing.
