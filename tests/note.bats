@@ -41,6 +41,20 @@ teardown() { teardown_scratch; }
   [ -z "$output" ]
 }
 
+@test "does not write a debug payload file when HHR_DEBUG_PAYLOAD is unset" {
+  unset HHR_DEBUG_PAYLOAD
+  printf '%s' "$(subagent_stop_payload s1 a1 impl note)" | sh "$HHR_ROOT/scripts/note.sh"
+  run sh -c 'ls "$1"/payloads-*.jsonl 2>/dev/null' _ "$DIR"
+  [ -z "$output" ]
+}
+
+@test "writes one debug payload line when HHR_DEBUG_PAYLOAD=1" {
+  export HHR_DEBUG_PAYLOAD=1
+  printf '%s' "$(subagent_stop_payload s1 a1 impl note)" | sh "$HHR_ROOT/scripts/note.sh"
+  [ -f "$DIR/payloads-SubagentStop.jsonl" ]
+  [ "$(wc -l < "$DIR/payloads-SubagentStop.jsonl" | tr -d ' ')" -eq 1 ]
+}
+
 @test "init creates the state directory" {
   printf '{"session_id":"fresh","hook_event_name":"SessionStart"}' | sh "$HHR_ROOT/scripts/init.sh"
   [ -d "$CLAUDE_PLUGIN_DATA/sessions/fresh" ]

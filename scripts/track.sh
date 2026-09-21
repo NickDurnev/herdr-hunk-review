@@ -9,6 +9,7 @@ hhr_have jq || exit 0
 session=$(printf '%s' "$payload" | hhr_json_get session_id)
 [ -n "$session" ] || exit 0
 dir="$(hhr_state_dir "$session")" || exit 0
+hhr_debug_payload "$dir" "$payload"
 hhr_guard "$dir"
 
 agent=$(printf '%s' "$payload" | jq -r '.agent_id // "main"')

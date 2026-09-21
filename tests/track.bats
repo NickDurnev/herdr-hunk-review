@@ -5,6 +5,21 @@ teardown() { teardown_scratch; }
 
 run_track() { printf '%s' "$1" | sh "$HHR_ROOT/scripts/track.sh"; }
 
+@test "does not write a debug payload file when HHR_DEBUG_PAYLOAD is unset" {
+  unset HHR_DEBUG_PAYLOAD
+  run_track "$(post_tool_payload s13 agent1 "$REPO/tracked.txt")"
+  run sh -c 'ls "$1"/payloads-*.jsonl 2>/dev/null' _ "$CLAUDE_PLUGIN_DATA/sessions/s13"
+  [ -z "$output" ]
+}
+
+@test "writes one debug payload line when HHR_DEBUG_PAYLOAD=1" {
+  export HHR_DEBUG_PAYLOAD=1
+  run_track "$(post_tool_payload s14 agent1 "$REPO/tracked.txt")"
+  d="$CLAUDE_PLUGIN_DATA/sessions/s14"
+  [ -f "$d/payloads-PostToolUse.jsonl" ]
+  [ "$(wc -l < "$d/payloads-PostToolUse.jsonl" | tr -d ' ')" -eq 1 ]
+}
+
 @test "records the repo, a baseline and the file" {
   run_track "$(post_tool_payload s1 agent1 "$REPO/tracked.txt")"
   st="$(cat "$CLAUDE_PLUGIN_DATA/sessions/s1/state.json")"

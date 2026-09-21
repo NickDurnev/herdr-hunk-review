@@ -16,6 +16,18 @@ hhr_state_dir() {
 
 hhr_json_get() { jq -r --arg k "$1" '.[$k] // empty'; }
 
+# Diagnostic aid, off by default. When HHR_DEBUG_PAYLOAD=1, append the raw hook
+# payload as one JSON line to <dir>/payloads-<hook_event_name>.jsonl, so the real
+# shape of a payload (field names, nulls vs empty strings) can be inspected later.
+# Complete no-op - no file touched, no stdout - when the variable is unset.
+hhr_debug_payload() {
+  [ "${HHR_DEBUG_PAYLOAD:-}" = 1 ] || return 0
+  [ -n "$1" ] && [ -n "$2" ] || return 0
+  evt=$(printf '%s' "$2" | jq -r '.hook_event_name // "unknown"' 2>/dev/null) || evt=unknown
+  printf '%s\n' "$2" >> "$1/payloads-$evt.jsonl" 2>/dev/null || true
+  return 0
+}
+
 # Exit the CALLING script 0 when the plugin must not act. Recording (prebaseline.sh,
 # track.sh, note.sh) must run whether or not the session is paused - only refresh.sh
 # gates on the `paused` marker, so pausing stops the pane from updating without losing

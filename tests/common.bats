@@ -95,3 +95,33 @@ teardown() { teardown_scratch; }
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
+
+@test "debug_payload writes nothing when HHR_DEBUG_PAYLOAD is unset" {
+  d="$(hhr_state_dir sess-debug-off)"
+  unset HHR_DEBUG_PAYLOAD
+  run hhr_debug_payload "$d" '{"hook_event_name":"SubagentStop","agent_id":"a1"}'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run sh -c 'ls "$1"/payloads-*.jsonl 2>/dev/null' _ "$d"
+  [ -z "$output" ]
+}
+
+@test "debug_payload writes one line named after hook_event_name when set to 1" {
+  d="$(hhr_state_dir sess-debug-on)"
+  export HHR_DEBUG_PAYLOAD=1
+  payload='{"hook_event_name":"SubagentStop","agent_id":"a1","agent_type":"","agent_output":""}'
+  run hhr_debug_payload "$d" "$payload"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ -f "$d/payloads-SubagentStop.jsonl" ]
+  [ "$(wc -l < "$d/payloads-SubagentStop.jsonl" | tr -d ' ')" -eq 1 ]
+  [ "$(cat "$d/payloads-SubagentStop.jsonl")" = "$payload" ]
+}
+
+@test "debug_payload falls back to 'unknown' when hook_event_name is absent" {
+  d="$(hhr_state_dir sess-debug-noevt)"
+  export HHR_DEBUG_PAYLOAD=1
+  run hhr_debug_payload "$d" '{"agent_id":"a1"}'
+  [ "$status" -eq 0 ]
+  [ -f "$d/payloads-unknown.jsonl" ]
+}
