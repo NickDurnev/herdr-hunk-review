@@ -30,20 +30,7 @@ hhr_lock "$dir" || exit 0
 state="$dir/state.json"
 [ -f "$state" ] || printf '{"repos":{},"agents":{}}' > "$state"
 
-if [ "$(jq -r --arg r "$root" '.repos[$r] // empty' "$state")" = "" ]; then
-  base=$(git -C "$root" stash create 2>/dev/null) || base=
-  [ -n "$base" ] || base=$(git -C "$root" rev-parse HEAD 2>/dev/null) || base=
-  if [ -n "$base" ]; then
-    prefix=$(basename "$root")
-    n=2
-    while [ "$(jq -r --arg p "$prefix" '[.repos[] | select(.prefix == $p)] | length' "$state")" != "0" ]; do
-      prefix="$(basename "$root")-$n"
-      n=$((n + 1))
-    done
-    jq --arg r "$root" --arg b "$base" --arg p "$prefix" \
-       '.repos[$r] = {baseline:$b, prefix:$p}' "$state" > "$state.tmp" && mv "$state.tmp" "$state"
-  fi
-fi
+hhr_capture_repo_baseline "$state" "$root"
 
 hhr_unlock "$dir"
 exit 0

@@ -37,6 +37,24 @@ make_repo() {
   printf '%s' "$repo"
 }
 
+# Makes a git repo at $1 with a genuine, left-unresolved merge conflict on tracked.txt:
+# two branches each replace its content, then merge fails and the conflict is left in
+# place (conflict markers still in the working tree, MERGE_HEAD still set). This is
+# what makes `git stash create` really fail ("needs merge") instead of merely being
+# empty - the fallback path this plugin's baseline capture must handle. Echoes the
+# repo path like make_repo.
+make_conflicted_repo() {
+  repo="$(make_repo "$1")"
+  git -C "$repo" checkout -q -b other
+  printf 'theirs\n' > "$repo/tracked.txt"
+  git -C "$repo" commit -qam theirs
+  git -C "$repo" checkout -q -
+  printf 'ours\n' > "$repo/tracked.txt"
+  git -C "$repo" commit -qam ours
+  git -C "$repo" merge other >/dev/null 2>&1 || true
+  printf '%s' "$repo"
+}
+
 # Emits a PostToolUse payload: session_id, agent_id, file_path
 post_tool_payload() {
   jq -nc --arg s "$1" --arg a "$2" --arg f "$3" \

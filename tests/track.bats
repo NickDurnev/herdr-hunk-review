@@ -48,23 +48,32 @@ run_track() { printf '%s' "$1" | sh "$HHR_ROOT/scripts/track.sh"; }
 
 @test "falls back to HEAD on a clean tree" {
   run_track "$(post_tool_payload s4 agent1 "$REPO/tracked.txt")"
-  base="$(jq -r --arg r "$REPO" '.repos[$r].baseline' "$CLAUDE_PLUGIN_DATA/sessions/s4/state.json")"
+  st="$CLAUDE_PLUGIN_DATA/sessions/s4/state.json"
+  base="$(jq -r --arg r "$REPO" '.repos[$r].baseline' "$st")"
   [ "$base" = "$(git -C "$REPO" rev-parse HEAD)" ]
+  # A clean tree has nothing to exclude - no dirty_at_baseline should be recorded.
+  [ "$(jq -r --arg r "$REPO" '.repos[$r] | has("dirty_at_baseline")' "$st")" = "false" ]
 }
 
-@test "falls back to HEAD when stash create fails on a conflicted tree" {
-  # Build a real merge conflict, which makes `git stash create` fail.
-  git -C "$REPO" checkout -q -b other
-  printf 'theirs\n' > "$REPO/tracked.txt"
-  git -C "$REPO" commit -qam theirs
-  git -C "$REPO" checkout -q -
-  printf 'ours\n' > "$REPO/tracked.txt"
-  git -C "$REPO" commit -qam ours
-  git -C "$REPO" merge other >/dev/null 2>&1 || true
-  run run_track "$(post_tool_payload s9 a1 "$REPO/tracked.txt")"
+@test "falls back to HEAD when stash create fails on a conflicted tree, and records dirty_at_baseline" {
+  # The original version of this test asserted only that the baseline was a valid
+  # 40-char sha - true of ANY commit, including plain HEAD, so it shipped without ever
+  # checking the thing that actually matters: that the pre-existing conflict is
+  # recorded so patch.sh can exclude it. Strengthened here.
+  RC="$(cd "$(make_conflicted_repo "$SCRATCH/repoConflict")" && pwd -P)"
+  run run_track "$(post_tool_payload s9 a1 "$RC/tracked.txt")"
   [ "$status" -eq 0 ]
-  base="$(jq -r --arg r "$REPO" '.repos[$r].baseline' "$CLAUDE_PLUGIN_DATA/sessions/s9/state.json")"
+  st="$CLAUDE_PLUGIN_DATA/sessions/s9/state.json"
+  base="$(jq -r --arg r "$RC" '.repos[$r].baseline' "$st")"
   [ "${#base}" -eq 40 ]
+  # Prove the baseline is plain HEAD (stash create genuinely failed - "needs merge"),
+  # which means it does NOT itself exclude the conflict - otherwise the
+  # dirty_at_baseline assertion below would be vacuously true.
+  [ "$base" = "$(git -C "$RC" rev-parse HEAD)" ]
+  run git -C "$RC" diff "$base" -- tracked.txt
+  [ -n "$output" ]
+  # The thing that matters: the conflicted path is recorded for patch.sh to exclude.
+  [ "$(jq -c --arg r "$RC" '.repos[$r].dirty_at_baseline' "$st")" = '["tracked.txt"]' ]
 }
 
 @test "works on a detached HEAD" {

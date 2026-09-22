@@ -87,3 +87,37 @@ EOF
   tree2="$(git -C "$REPO2" rev-parse "$(jq -r --arg r "$REPO2" '.repos[$r].baseline' "$D2/state.json")^{tree}")"
   [ "$tree1" = "$tree2" ]
 }
+
+@test "re-baselining a conflicted repo recomputes dirty_at_baseline, so acknowledgment actually takes effect" {
+  # This is the bug report: closing the pane re-baselines through the exact same
+  # failing `git stash create`, falls back to HEAD again, and - without recomputing
+  # dirty_at_baseline - the identical pre-existing content reappears every time.
+  # Acknowledging is structurally incapable of working on such a repo until re-baselining
+  # also recomputes the dirty set.
+  #
+  # Seeded by hand with baseline=HEAD and NO dirty_at_baseline - standing in for
+  # whatever state a prior acknowledgment (pre-fix) left behind, where the field was
+  # never populated. Seeding via hhr_capture_repo_baseline instead would already record
+  # the correct set up front, and since the repo's tree does not change between the two
+  # captures here, hhr_reset_repo_baselines "recomputing" the same value it already had
+  # would look identical to hhr_reset_repo_baselines never touching it at all - the
+  # assertions below could not tell recomputation from a no-op. Starting with the field
+  # absent means only a real recompute can make it appear.
+  RC="$(cd "$(make_conflicted_repo "$SCRATCH/repoConflict")" && pwd -P)"
+  DC="$CLAUDE_PLUGIN_DATA/sessions/sc"; mkdir -p "$DC"
+  BASE="$(git -C "$RC" rev-parse HEAD)"
+  jq -nc --arg r "$RC" --arg b "$BASE" \
+    '{repos:{($r):{baseline:$b,prefix:"repoConflict"}},agents:{}}' > "$DC/state.json"
+  [ "$(jq -r --arg r "$RC" '.repos[$r] | has("dirty_at_baseline")' "$DC/state.json")" = "false" ]
+
+  sh "$HHR_ROOT/scripts/baseline.sh" sc
+
+  # The conflict is still unresolved, so stash create fails again, and re-baselining
+  # must recompute dirty_at_baseline from scratch - it was never seeded here.
+  [ "$(jq -c --arg r "$RC" '.repos[$r].dirty_at_baseline' "$DC/state.json")" = '["tracked.txt"]' ]
+
+  # The thing that matters: rebuilding the patch after acknowledgment shows nothing -
+  # before this fix, this was silently non-empty every time (the no-op the user hit).
+  sh -c '. "$1/scripts/patch.sh"; hhr_build_patch "$2"' _ "$HHR_ROOT" "$DC"
+  [ ! -s "$DC/combined.patch" ]
+}

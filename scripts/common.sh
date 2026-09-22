@@ -76,6 +76,55 @@ hhr_lock() {
 
 hhr_unlock() { rm -rf "$1/.lock"; }
 
+# Paths already modified or unmerged in ROOT relative to HEAD, as a JSON array of
+# repo-root-relative paths (sorted, unique). Only meaningful on the `git stash create`
+# HEAD-fallback path (see hhr_capture_repo_baseline / hhr_reset_repo_baselines below):
+# when stash create succeeds it folds the dirty tree into the baseline commit itself,
+# so nothing needs excluding and this is never called. `diff HEAD --name-only` alone
+# does not surface unmerged paths on every git version, hence the second pass with
+# --diff-filter=U.
+hhr_dirty_paths_json() {
+  { git -C "$1" diff HEAD --name-only 2>/dev/null; \
+    git -C "$1" diff --name-only --diff-filter=U 2>/dev/null; } \
+    | sort -u | jq -R -s -c 'split("\n") | map(select(length > 0))'
+}
+
+# First-touch snapshot for a repo prebaseline.sh/track.sh have not recorded yet this
+# session: a de-duplicated `prefix`, and a baseline captured the same way everywhere -
+# prefer `git stash create`, which folds the dirty tree into the commit itself so a
+# plain `git diff $base` already excludes it. Fall back to `git rev-parse HEAD` when
+# stash create is empty (a clean tree) or fails outright (an unresolved merge - stash
+# create refuses to touch unmerged paths). Only that fallback leaves pre-existing
+# drift unexcluded by the baseline sha itself, so only then is `dirty_at_baseline` also
+# recorded: every path already modified or unmerged at that moment, for patch.sh to
+# subtract from the diff explicitly (see patch.sh). Idempotent - a no-op if STATE
+# already has an entry for ROOT. Writes STATE in place; the caller must hold the lock.
+hhr_capture_repo_baseline() {
+  state="$1"
+  root="$2"
+  [ "$(jq -r --arg r "$root" '.repos[$r] // empty' "$state")" = "" ] || return 0
+
+  base=$(git -C "$root" stash create 2>/dev/null) || base=
+  if [ -n "$base" ]; then
+    dirty='[]'
+  else
+    base=$(git -C "$root" rev-parse HEAD 2>/dev/null) || base=
+    [ -n "$base" ] || return 0
+    dirty=$(hhr_dirty_paths_json "$root")
+  fi
+
+  prefix=$(basename "$root")
+  n=2
+  while [ "$(jq -r --arg p "$prefix" '[.repos[] | select(.prefix == $p)] | length' "$state")" != "0" ]; do
+    prefix="$(basename "$root")-$n"
+    n=$((n + 1))
+  done
+
+  jq --arg r "$root" --arg b "$base" --arg p "$prefix" --argjson d "$dirty" \
+     '.repos[$r] = ({baseline:$b, prefix:$p} + (if ($d | length) > 0 then {dirty_at_baseline:$d} else {} end))' \
+     "$state" > "$state.tmp" && mv "$state.tmp" "$state"
+}
+
 # Re-snapshot every tracked repo's baseline to its current working state, and clear
 # stored agent notes - the shared core of "acknowledge everything shown so far".
 # Shared by baseline.sh (/hunk-baseline) and hhr_pane_ensure's pane-close
@@ -83,6 +132,14 @@ hhr_unlock() { rm -rf "$1/.lock"; }
 # two copies. Deliberately does NOT lock: baseline.sh locks around its own call, and
 # hhr_pane_ensure runs inside refresh.sh's lock already - locking again here would
 # deadlock against the caller's own held lock instead of merely being redundant.
+#
+# Recomputes `dirty_at_baseline` the same way hhr_capture_repo_baseline does (see
+# above) - re-baselining a repo that is still conflicted must record a fresh dirty set,
+# or acknowledgment silently does nothing there: closing the pane re-baselines through
+# the same failing `git stash create`, and the old dirty set (or none at all) would
+# leave the same pre-existing drift showing up again. A repo that has since resolved
+# down to a clean tree drops any stale `dirty_at_baseline` from a prior conflicted
+# snapshot - stash create succeeding again means nothing needs excluding any more.
 #
 # A bare `for root in $(jq ...)` word-splits on spaces in the repo path; read the
 # keys from a file instead, one per line, like hhr_build_patch does.
@@ -95,8 +152,17 @@ hhr_reset_repo_baselines() {
   while IFS= read -r root; do
     [ -d "$root" ] || continue
     base=$(git -C "$root" stash create 2>/dev/null) || base=
-    [ -n "$base" ] || base=$(git -C "$root" rev-parse HEAD 2>/dev/null) || continue
-    jq --arg r "$root" --arg b "$base" '.repos[$r].baseline = $b' "$state" > "$state.tmp" && mv "$state.tmp" "$state"
+    if [ -n "$base" ]; then
+      dirty='[]'
+    else
+      base=$(git -C "$root" rev-parse HEAD 2>/dev/null) || continue
+      dirty=$(hhr_dirty_paths_json "$root")
+    fi
+    jq --arg r "$root" --arg b "$base" --argjson d "$dirty" \
+       'if ($d | length) > 0
+        then .repos[$r].baseline = $b | .repos[$r].dirty_at_baseline = $d
+        else .repos[$r].baseline = $b | .repos[$r] |= del(.dirty_at_baseline) end' \
+       "$state" > "$state.tmp" && mv "$state.tmp" "$state"
   done < "$reposlist"
   rm -f "$reposlist"
   jq '.agents = {}' "$state" > "$state.tmp" && mv "$state.tmp" "$state"

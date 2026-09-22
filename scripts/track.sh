@@ -38,20 +38,7 @@ root=$(git -C "$filedir" rev-parse --show-toplevel 2>/dev/null) || root=
 # was enabled mid-session), and it still swallows the first edit — but that beats recording
 # nothing for a repo this hook has otherwise never seen.
 # Snapshot the baseline the first time this repo is seen.
-if [ "$(jq -r --arg r "$root" '.repos[$r] // empty' "$state")" = "" ]; then
-  base=$(git -C "$root" stash create 2>/dev/null) || base=
-  [ -n "$base" ] || base=$(git -C "$root" rev-parse HEAD 2>/dev/null) || base=
-  if [ -n "$base" ]; then
-    prefix=$(basename "$root")
-    n=2
-    while [ "$(jq -r --arg p "$prefix" '[.repos[] | select(.prefix == $p)] | length' "$state")" != "0" ]; do
-      prefix="$(basename "$root")-$n"
-      n=$((n + 1))
-    done
-    jq --arg r "$root" --arg b "$base" --arg p "$prefix" \
-       '.repos[$r] = {baseline:$b, prefix:$p}' "$state" > "$state.tmp" && mv "$state.tmp" "$state"
-  fi
-fi
+hhr_capture_repo_baseline "$state" "$root"
 
 jq --arg a "$agent" --arg f "$file" \
    '.agents[$a] = (.agents[$a] // {type:"", output:"", files:[]})

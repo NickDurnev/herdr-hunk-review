@@ -61,6 +61,25 @@ The baseline snapshot runs on `PreToolUse`, not `PostToolUse`, on purpose: by th
 already include the very edit it's supposed to exclude — the first change to every repo
 would silently vanish from the diff. Taking it before the write closes that gap.
 
+### Baselining a repo with an unresolved merge
+
+The baseline is normally `git stash create` — a commit that folds the tree's dirty
+state in, so a plain `git diff` against it already excludes that drift. On a repo
+with a genuine unresolved merge (`DU`/unmerged paths), `stash create` refuses to run
+at all and the baseline falls back to plain `HEAD` — which, unlike the clean-tree
+case, does **not** itself exclude anything: the repo's pre-existing modified and
+unmerged paths sit outside that commit entirely, so every one of them would otherwise
+show up as if the session had made it, on every refresh, and reappear identically
+after closing the pane (acknowledgment re-baselines through the same failing `stash
+create`).
+
+To keep the fallback meaningful, this path also snapshots the set of paths already
+dirty or unmerged at that moment and excludes them from the diff explicitly —
+subtracting any path the session itself went on to edit, so that one still appears.
+Both `/hunk-baseline` and the pane-close acknowledgment recompute this set on every
+re-baseline, so acknowledging a still-conflicted repo actually clears the pane instead
+of silently doing nothing.
+
 ## Requirements
 
 - **`git`** and **`jq`** — required. Every hook that touches state needs them; without

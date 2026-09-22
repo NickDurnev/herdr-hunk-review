@@ -30,3 +30,19 @@ teardown() { teardown_scratch; }
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
+
+@test "on a conflicted tree, prebaseline falls back to HEAD and records dirty_at_baseline" {
+  # This is the real-world bug: an unresolved merge makes `git stash create` fail
+  # ("needs merge"), so the baseline falls back to plain HEAD - which does NOT itself
+  # exclude the repo's pre-existing unmerged/modified paths. Without dirty_at_baseline,
+  # every one of them reads as a session change forever, and re-baselining (closing the
+  # pane) can never fix it because it hits the exact same failing stash create.
+  RC="$(cd "$(make_conflicted_repo "$SCRATCH/repoConflict")" && pwd -P)"
+  run sh -c 'printf "%s" "$1" | sh "$2/scripts/prebaseline.sh"' _ \
+    "$(post_tool_payload s23 a1 "$RC/tracked.txt")" "$HHR_ROOT"
+  [ "$status" -eq 0 ]
+  st="$CLAUDE_PLUGIN_DATA/sessions/s23/state.json"
+  base="$(jq -r --arg r "$RC" '.repos[$r].baseline' "$st")"
+  [ "$base" = "$(git -C "$RC" rev-parse HEAD)" ]
+  [ "$(jq -c --arg r "$RC" '.repos[$r].dirty_at_baseline' "$st")" = '["tracked.txt"]' ]
+}

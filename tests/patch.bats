@@ -17,6 +17,11 @@ teardown() { teardown_scratch; }
 
 build() { sh -c '. "$1/scripts/patch.sh"; hhr_build_patch "$2"' _ "$HHR_ROOT" "$DIR"; }
 
+# Runs the real hhr_capture_repo_baseline (common.sh) against a state file and repo
+# root, exactly as prebaseline.sh/track.sh do - so a conflicted-repo test here exercises
+# the actual `git stash create` failure path, not a hand-rolled dirty_at_baseline.
+capture_baseline() { sh -c '. "$1/scripts/common.sh"; hhr_capture_repo_baseline "$2" "$3"' _ "$HHR_ROOT" "$1" "$2"; }
+
 @test "includes an uncommitted change with the repo prefix" {
   printf 'new line\n' >> "$REPO/tracked.txt"
   build
@@ -212,4 +217,76 @@ make_three_big_diffs() {
     '# truncated:'*) : ;;
     *) false ;;
   esac
+}
+
+# Real conflicted repo (genuine unresolved merge, so `git stash create` really fails
+# with "needs merge") captured through the actual hhr_capture_repo_baseline, exercising
+# the fallback-to-HEAD-plus-dirty_at_baseline path end to end, not a hand-built fixture.
+setup_conflicted_repo() {
+  RC="$(cd "$(make_conflicted_repo "$SCRATCH/repoConflict")" && pwd -P)"
+  DC="$CLAUDE_PLUGIN_DATA/sessions/sc"
+  mkdir -p "$DC"
+  printf '{"repos":{},"agents":{}}' > "$DC/state.json"
+  capture_baseline "$DC/state.json" "$RC"
+}
+
+@test "a repo whose stash create fails: pre-existing modifications do not appear in the patch" {
+  setup_conflicted_repo
+  # Sanity: prove the fallback really happened and the conflict really was recorded -
+  # otherwise the assertion below would be vacuously true.
+  [ "$(jq -r --arg r "$RC" '.repos[$r].baseline' "$DC/state.json")" = "$(git -C "$RC" rev-parse HEAD)" ]
+  [ "$(jq -c --arg r "$RC" '.repos[$r].dirty_at_baseline' "$DC/state.json")" = '["tracked.txt"]' ]
+  sh -c '. "$1/scripts/patch.sh"; hhr_build_patch "$2"' _ "$HHR_ROOT" "$DC"
+  [ ! -s "$DC/combined.patch" ]
+}
+
+@test "a file dirty at baseline that the session then edits still appears (subtraction)" {
+  setup_conflicted_repo
+  mark_touched "$DC/state.json" "$RC/tracked.txt"
+  printf 'session edit\n' >> "$RC/tracked.txt"
+  sh -c '. "$1/scripts/patch.sh"; hhr_build_patch "$2"' _ "$HHR_ROOT" "$DC"
+  grep -q 'a/repoConflict/tracked.txt' "$DC/combined.patch"
+  grep -q '^+session edit' "$DC/combined.patch"
+}
+
+@test "in a conflicted repo, a different clean file the session touches appears as normal" {
+  # A NEW committed file cannot be added here (git refuses to commit anything while
+  # tracked.txt's merge conflict is unresolved), so this uses an untracked file the
+  # session touches instead - proving the two exclusion mechanisms (dirty_at_baseline
+  # and the untouched-untracked-file guard) coexist correctly in the same repo.
+  setup_conflicted_repo
+  printf 'brand new\n' > "$RC/fresh.txt"
+  mark_touched "$DC/state.json" "$RC/fresh.txt"
+  sh -c '. "$1/scripts/patch.sh"; hhr_build_patch "$2"' _ "$HHR_ROOT" "$DC"
+  grep -q 'b/repoConflict/fresh.txt' "$DC/combined.patch"
+  grep -q '^+brand new' "$DC/combined.patch"
+  # The still-untouched conflict on tracked.txt must stay excluded alongside it.
+  run grep -q 'tracked.txt' "$DC/combined.patch"
+  [ "$status" -ne 0 ]
+}
+
+@test "a repo where stash create succeeds records no dirty_at_baseline and behaves as before" {
+  # Must have real pre-existing uncommitted (but non-conflicted) drift when captured,
+  # or `git stash create` returns empty on a clean tree and this exercises the same
+  # HEAD-fallback path as the clean-tree tests elsewhere, not the stash-create-succeeds
+  # path this test is named for.
+  R2="$(cd "$(make_repo "$SCRATCH/repoClean")" && pwd -P)"
+  printf 'pre-existing uncommitted change\n' >> "$R2/tracked.txt"
+  D2="$CLAUDE_PLUGIN_DATA/sessions/s-clean"
+  mkdir -p "$D2"
+  printf '{"repos":{},"agents":{}}' > "$D2/state.json"
+  capture_baseline "$D2/state.json" "$R2"
+  # Sanity: stash create really succeeded - the baseline folds in the pre-existing
+  # change, so it differs from plain HEAD.
+  [ "$(jq -r --arg r "$R2" '.repos[$r].baseline' "$D2/state.json")" != "$(git -C "$R2" rev-parse HEAD)" ]
+  [ "$(jq -r --arg r "$R2" '.repos[$r] | has("dirty_at_baseline")' "$D2/state.json")" = "false" ]
+  printf 'new\n' >> "$R2/tracked.txt"
+  sh -c '. "$1/scripts/patch.sh"; hhr_build_patch "$2"' _ "$HHR_ROOT" "$D2"
+  grep -q '^+new' "$D2/combined.patch"
+  # Same as before this fix: the baseline (not dirty_at_baseline) already excludes the
+  # pre-existing drift, with no explicit exclusion needed - it must not show as an
+  # ADDED line (a bare substring match would also hit it as unchanged diff CONTEXT,
+  # since it sits right next to the session's own added line).
+  run grep -q '^+pre-existing uncommitted change' "$D2/combined.patch"
+  [ "$status" -ne 0 ]
 }

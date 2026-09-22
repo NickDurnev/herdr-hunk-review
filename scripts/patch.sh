@@ -12,6 +12,7 @@ hhr_build_patch() {
   reposlist="$dir/.patch.repos.tmp"
   fileslist="$dir/.patch.files.tmp"
   touched="$dir/.patch.touched.tmp"
+  dirtylist="$dir/.patch.dirty.tmp"
   : > "$tmp"
 
   jq -r '.repos | to_entries[] | "\(.key)\t\(.value.baseline)\t\(.value.prefix)"' "$state" > "$reposlist"
@@ -27,7 +28,29 @@ hhr_build_patch() {
 
   while IFS="$(printf '\t')" read -r root base prefix; do
     [ -d "$root" ] || continue
-    git -C "$root" diff --src-prefix="a/$prefix/" --dst-prefix="b/$prefix/" "$base" >> "$tmp" 2>/dev/null || true
+
+    # `dirty_at_baseline` (see hhr_capture_repo_baseline/hhr_reset_repo_baselines in
+    # common.sh) is only set on the git-stash-create-failed fallback path, where the
+    # baseline sha is plain HEAD and so does NOT itself exclude the repo's pre-existing
+    # drift/unmerged paths. Exclude each one explicitly with git's own pathspec exclude
+    # magic - EXCEPT a path the session went on to edit (agents[].files[], the same
+    # $touched list used below for untracked files): that one must still appear.
+    # `:(exclude,literal)` (not plain `:(exclude)`) so a path containing glob
+    # metacharacters (`[`, `*`, `?`) is matched literally, not as a pattern. Built via
+    # POSIX `set --` (no arrays in `sh`), inside a subshell so it never leaks into the
+    # caller's own positional parameters.
+    : > "$dirtylist"
+    jq -r --arg r "$root" '.repos[$r].dirty_at_baseline[]? // empty' "$state" 2>/dev/null > "$dirtylist" || : > "$dirtylist"
+
+    (
+      set --
+      while IFS= read -r dp; do
+        [ -n "$dp" ] || continue
+        grep -qxF "$root/$dp" "$touched" 2>/dev/null && continue
+        set -- "$@" ":(exclude,literal)$dp"
+      done < "$dirtylist"
+      git -C "$root" diff --src-prefix="a/$prefix/" --dst-prefix="b/$prefix/" "$base" -- "$@"
+    ) >> "$tmp" 2>/dev/null || true
 
     : > "$fileslist"
     git -C "$root" ls-files --others --exclude-standard 2>/dev/null > "$fileslist"
@@ -46,7 +69,7 @@ hhr_build_patch() {
     done < "$fileslist"
   done < "$reposlist"
 
-  rm -f "$reposlist" "$fileslist" "$touched"
+  rm -f "$reposlist" "$fileslist" "$touched" "$dirtylist"
 
   if [ "$(wc -c < "$tmp")" -gt "$HHR_MAX_PATCH_BYTES" ]; then
     hhr_truncate_patch_to_file_boundary "$tmp" "$HHR_MAX_PATCH_BYTES" > "$tmp.cut"
