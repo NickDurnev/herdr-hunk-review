@@ -155,6 +155,12 @@ Claude Code namespaces plugin commands, so each one is invoked as
 | `/herdr-hunk-review:hunk-baseline` | Acknowledges everything the pane currently shows and resets the diff baseline, without closing the pane — the same acknowledgment that happens automatically when you close the pane yourself, done explicitly. |
 | `/herdr-hunk-review:hunk-pause` | Toggles automatic refreshing on and off for the current session. |
 
+Each command resolves the current session from `$CLAUDE_CODE_SESSION_ID` (falling back
+to a directory-listing heuristic only if that is unset), and resolves the plugin's data
+directory the same way the hooks do. If neither can be found — an install layout the
+plugin doesn't recognize, for instance — the command reports that error instead of
+silently acting on nothing.
+
 ## Using it outside herdr
 
 Without `herdr`, no pane opens automatically, but nothing is lost — the same patch and

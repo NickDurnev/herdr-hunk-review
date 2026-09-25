@@ -6,13 +6,68 @@ HHR_NOTE_MAX_CHARS=300
 
 hhr_have() { command -v "$1" >/dev/null 2>&1; }
 
+# Resolves the sessions root. Three candidates, first match wins - NEVER creates any
+# of them (a phantom, auto-created root is exactly what hid this bug: it always
+# "resolved", it was just empty).
+#
+#   1. $CLAUDE_PLUGIN_DATA/sessions, when the harness set it. This is the HOOK path -
+#      unconditional, unchanged from before: hooks always run with it set, and
+#      hhr_state_dir's own mkdir -p is what makes it exist on first use, so it must
+#      NOT be existence-gated here or the very first hook run of a fresh install would
+#      fall through to the candidates below instead.
+#   2. The installed-layout root, derived from this script's own location. A plugin
+#      installs at
+#        <claude-root>/plugins/cache/<marketplace>/<plugin>/<version>/scripts/<file>
+#      and its data lives at
+#        <claude-root>/plugins/data/<plugin>-<marketplace>/sessions
+#      This is the path a COMMAND's Bash tool call actually reads from (CLAUDE_PLUGIN_DATA
+#      is not set there), so it must be checked for existence before trusting it.
+#   3. $HOME/.claude/herdr-hunk-review/sessions - the legacy root, kept for pre-existing
+#      installs or manual runs. Also existence-gated.
+#
+# If NONE of these exist, this returns 1 and prints a diagnostic to stderr. That is
+# deliberately noisy: hooks must stay silent and exit 0 on any problem, but this
+# function (via state-root.sh, or directly from refresh.sh/baseline.sh) is only ever
+# reached in a hook's execution path through candidate 1, which cannot fail (see
+# above) - so the failure branch below is only reachable from a COMMAND's Bash tool
+# call, where a loud, real error beats a confident "nothing to review". Do not "fix"
+# this for symmetry with hooks later; the asymmetry is intentional.
 hhr_state_root() {
-  # CLAUDE_PLUGIN_DATA is set by the harness; fall back for tests and manual runs.
-  printf '%s' "${CLAUDE_PLUGIN_DATA:-$HOME/.claude/herdr-hunk-review}/sessions"
+  if [ -n "${CLAUDE_PLUGIN_DATA:-}" ]; then
+    printf '%s' "$CLAUDE_PLUGIN_DATA/sessions"
+    return 0
+  fi
+
+  # Logical pwd (no -P): keep whatever form $0 was given in (CLAUDE_PLUGIN_ROOT is
+  # already an absolute path by the time the harness substitutes it), rather than
+  # resolving symlinks a real install may not even have.
+  scripts_dir=$(cd "$(dirname "$0")" 2>/dev/null && pwd) || scripts_dir=
+  if [ -n "$scripts_dir" ]; then
+    version_dir=$(dirname "$scripts_dir")
+    plugin_dir=$(dirname "$version_dir")
+    marketplace_dir=$(dirname "$plugin_dir")
+    plugins_dir=$(dirname "$(dirname "$marketplace_dir")")
+    derived="$plugins_dir/data/$(basename "$plugin_dir")-$(basename "$marketplace_dir")/sessions"
+    if [ -d "$derived" ]; then
+      printf '%s' "$derived"
+      return 0
+    fi
+  fi
+
+  legacy="$HOME/.claude/herdr-hunk-review/sessions"
+  if [ -d "$legacy" ]; then
+    printf '%s' "$legacy"
+    return 0
+  fi
+
+  printf 'herdr-hunk-review: could not resolve a sessions data root (CLAUDE_PLUGIN_DATA unset, no installed-layout root under %s, no legacy root at %s)\n' \
+    "${plugins_dir:-<unresolved>}/data" "$legacy" >&2
+  return 1
 }
 
 hhr_state_dir() {
-  d="$(hhr_state_root)/$1"
+  root="$(hhr_state_root)" || return 1
+  d="$root/$1"
   mkdir -p "$d" || return 1
   printf '%s' "$d"
 }

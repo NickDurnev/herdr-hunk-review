@@ -16,7 +16,12 @@ here="$(dirname "$0")"
 session="$1"
 force="$2"
 [ -n "$session" ] || exit 0
-dir="$(hhr_state_dir "$session")" || exit 0
+# hhr_state_dir/hhr_state_root already printed a diagnostic to stderr on failure.
+# Exit non-zero (not 0) here: a hook invocation never reaches this branch (its
+# CLAUDE_PLUGIN_DATA is always set, so resolution always succeeds - see hhr_state_root),
+# so the only caller who CAN see this exit code is a command, which must be told
+# resolution failed rather than reading a silent, misleading exit 0.
+dir="$(hhr_state_dir "$session")" || exit 1
 hhr_guard "$dir"
 # Refreshing (and only refreshing) stops while paused; recording still happens via
 # prebaseline.sh/track.sh/note.sh regardless, so nothing edited while paused is lost.
