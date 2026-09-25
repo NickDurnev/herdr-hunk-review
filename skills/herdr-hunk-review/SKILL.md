@@ -29,7 +29,7 @@ hunk session list --json | jq -r --arg l "<state-dir>/combined.patch" \
 ```
 
 If `hunk session list` reports no patch session, there is no pane open. Say so and
-offer `/hunk-review`. Do not try to open one yourself.
+offer `/herdr-hunk-review:hunk-review`. Do not try to open one yourself.
 
 ## Read before you steer
 

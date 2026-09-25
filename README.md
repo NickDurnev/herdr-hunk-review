@@ -76,7 +76,7 @@ create`).
 To keep the fallback meaningful, this path also snapshots the set of paths already
 dirty or unmerged at that moment and excludes them from the diff explicitly —
 subtracting any path the session itself went on to edit, so that one still appears.
-Both `/hunk-baseline` and the pane-close acknowledgment recompute this set on every
+Both `/herdr-hunk-review:hunk-baseline` and the pane-close acknowledgment recompute this set on every
 re-baseline, so acknowledging a still-conflicted repo actually clears the pane instead
 of silently doing nothing.
 
@@ -124,7 +124,7 @@ Closing the pane is not a neutral act — it means "I have reviewed this; don't 
 me again." The plugin only notices the pane is gone on the *next* refresh (closing isn't
 intercepted directly, so this can lag by one refresh cycle), and when it does, provided
 nothing new landed in the meantime, it resets the baseline for every tracked repo — the
-same reset `/hunk-baseline` does. The acknowledged work then drops out of the diff, and
+same reset `/herdr-hunk-review:hunk-baseline` does. The acknowledged work then drops out of the diff, and
 the pane stays shut until new work shows up, at which point it reopens on its own.
 
 Nothing is discarded. The changes themselves are untouched in your working tree and in
@@ -138,17 +138,22 @@ including the part that would otherwise have been swallowed. The check is exact:
 patch that is byte-for-byte identical to what was last shown gets acknowledged; anything
 else reopens the pane.
 
-`/hunk-baseline` does the same acknowledgment explicitly, on demand, without requiring you
+`/herdr-hunk-review:hunk-baseline` does the same acknowledgment explicitly, on demand, without requiring you
 to close the pane first — useful when you want to mark everything as reviewed but keep
 watching for what comes next.
 
 ## Commands
 
+Claude Code namespaces plugin commands, so each one is invoked as
+`/herdr-hunk-review:<command>` — the bare `/hunk-review` will report
+`Unknown command`. Type `/herdr` and let completion fill in the rest.
+
+
 | Command | Does |
 |---|---|
-| `/hunk-review` | Refreshes the pane immediately and opens it if there is anything to show and it isn't already open. If everything so far has already been acknowledged (see [Closing the pane](#closing-the-pane)), it reports that instead of opening an empty pane. |
-| `/hunk-baseline` | Acknowledges everything the pane currently shows and resets the diff baseline, without closing the pane — the same acknowledgment that happens automatically when you close the pane yourself, done explicitly. |
-| `/hunk-pause` | Toggles automatic refreshing on and off for the current session. |
+| `/herdr-hunk-review:hunk-review` | Refreshes the pane immediately and opens it if there is anything to show and it isn't already open. If everything so far has already been acknowledged (see [Closing the pane](#closing-the-pane)), it reports that instead of opening an empty pane. |
+| `/herdr-hunk-review:hunk-baseline` | Acknowledges everything the pane currently shows and resets the diff baseline, without closing the pane — the same acknowledgment that happens automatically when you close the pane yourself, done explicitly. |
+| `/herdr-hunk-review:hunk-pause` | Toggles automatic refreshing on and off for the current session. |
 
 ## Using it outside herdr
 
@@ -197,9 +202,9 @@ itself is unaffected either way.
 patch's write time against the live session's last-updated timestamp reported by
 `hunk`; if the pane lags by more than 10 seconds, it restarts the viewer in place
 automatically on the next refresh. If it's still stuck after that, close the pane and
-run `/hunk-review` to reopen it.
+run `/herdr-hunk-review:hunk-review` to reopen it.
 
-**To pause automatic refreshing**, run `/hunk-pause` — it toggles a marker file that
+**To pause automatic refreshing**, run `/herdr-hunk-review:hunk-pause` — it toggles a marker file that
 `refresh.sh` checks before rebuilding the pane, and run it again to resume. Recording
 (which repo, which file, which agent, which closing note) is never gated on it — only
 the pane refresh is, so nothing edited while paused is lost once you resume.
@@ -211,11 +216,11 @@ the current patch before deciding what to do (a copy, not a timestamp — a writ
 comparison can't tell two rewrites inside the same second apart, so it isn't trustworthy
 here). An identical patch means the user closed it deliberately and nothing landed since
 — see [Closing the pane](#closing-the-pane): the plugin acknowledges it (resets the
-baseline, same as `/hunk-baseline`) and it stays closed. A different patch means new code
+baseline, same as `/herdr-hunk-review:hunk-baseline`) and it stays closed. A different patch means new code
 landed, so it is never acknowledged and the pane reopens automatically instead.
-`/hunk-pause` never touches this — only `/hunk-review` bypasses the `shown.patch` check
+`/herdr-hunk-review:hunk-pause` never touches this — only `/herdr-hunk-review:hunk-review` bypasses the `shown.patch` check
 (via `refresh.sh session_id force`), reopening the pane whenever there is something to
-show; if there is genuinely nothing to show (every repo already at its baseline), `/hunk-review`
+show; if there is genuinely nothing to show (every repo already at its baseline), `/herdr-hunk-review:hunk-review`
 reports that instead of opening an empty pane.
 
 **Inspecting the raw hook payload.** Set `HHR_DEBUG_PAYLOAD=1` in the environment

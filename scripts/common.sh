@@ -127,7 +127,7 @@ hhr_capture_repo_baseline() {
 
 # Re-snapshot every tracked repo's baseline to its current working state, and clear
 # stored agent notes - the shared core of "acknowledge everything shown so far".
-# Shared by baseline.sh (/hunk-baseline) and hhr_pane_ensure's pane-close
+# Shared by baseline.sh (/herdr-hunk-review:hunk-baseline) and hhr_pane_ensure's pane-close
 # acknowledgment path, so both take an identical snapshot instead of drifting apart as
 # two copies. Deliberately does NOT lock: baseline.sh locks around its own call, and
 # hhr_pane_ensure runs inside refresh.sh's lock already - locking again here would

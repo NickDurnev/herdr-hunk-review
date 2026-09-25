@@ -14,7 +14,7 @@ The `force` argument makes this bypass the "user closed it deliberately" check, 
 closed pane reopens even though nothing changed since it was closed. It does NOT
 override the separate empty-patch guard: if there is nothing to show at all (for
 example, right after the user closed the pane and the plugin acknowledged it, or right
-after `/hunk-baseline`), no pane opens - there would be nothing in it to show.
+after `/herdr-hunk-review:hunk-baseline`), no pane opens - there would be nothing in it to show.
 
 Then report one line:
 - If `<dir>/combined.patch` is empty or missing: say there are no changes to review

@@ -69,7 +69,7 @@ hhr_pane_ensure() {
     # the caller (refresh.sh) already rebuilt combined.patch just before calling us, so
     # an exact content match against shown.patch proves nothing landed between the
     # close and this detection: the snapshot taken right now is identical to one taken
-    # at the moment of the close. Acknowledge it exactly like /hunk-baseline does, then
+    # at the moment of the close. Acknowledge it exactly like /herdr-hunk-review:hunk-baseline does, then
     # regenerate the patch and sidecar so disk state matches the new (empty) baseline,
     # and drop shown.patch since it no longer describes anything that was ever
     # displayed.

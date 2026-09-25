@@ -32,9 +32,9 @@ teardown() { teardown_scratch; }
   [ -z "$output" ]
 }
 
-@test "/hunk-baseline and the pane-close acknowledgment path produce the same resulting state" {
+@test "/herdr-hunk-review:hunk-baseline and the pane-close acknowledgment path produce the same resulting state" {
   # Two independent repos, seeded identically, one session acknowledged via
-  # baseline.sh (/hunk-baseline) and the other via the close-detection path in
+  # baseline.sh (/herdr-hunk-review:hunk-baseline) and the other via the close-detection path in
   # hhr_pane_ensure (reached through refresh.sh) - both call the same
   # hhr_reset_repo_baselines, so both should end up at an equivalent snapshot.
   REPO2="$(make_repo "$SCRATCH/repoB")"
@@ -46,7 +46,7 @@ teardown() { teardown_scratch; }
   printf 'reviewed\n' >> "$REPO/tracked.txt"
   printf 'reviewed\n' >> "$REPO2/tracked.txt"
 
-  # Session 1: /hunk-baseline.
+  # Session 1: /herdr-hunk-review:hunk-baseline.
   sh "$HHR_ROOT/scripts/baseline.sh" s1
 
   # Session 2: open the pane, close it, let the next refresh detect and acknowledge.

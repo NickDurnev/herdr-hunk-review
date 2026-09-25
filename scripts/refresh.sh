@@ -3,7 +3,7 @@
 # Usage: refresh.sh <session_id> [force]
 # `force` clears the "shown.patch" marker before hhr_pane_ensure runs, so a pane the
 # user closed reopens regardless of whether anything changed since it was closed - this
-# is how /hunk-review always opens the pane when there is something to show. It does
+# is how /herdr-hunk-review:hunk-review always opens the pane when there is something to show. It does
 # NOT override the separate empty-patch guard below: with nothing to show (every repo
 # at its baseline), no pane opens, forced or not.
 set -e
@@ -32,7 +32,7 @@ hhr_build_sidecar "$dir"
 # The empty-patch guard. `force` NEVER bypasses this - it exists to defeat the
 # `shown.patch` marker below, not this check. An empty patch means every tracked repo
 # is at its baseline (most commonly: the close-acknowledgment path in hhr_pane_ensure
-# just ran, or /hunk-baseline just ran), so there is nothing to put in a pane; keep
+# just ran, or /herdr-hunk-review:hunk-baseline just ran), so there is nothing to put in a pane; keep
 # this as its own early exit rather than folding it into the `force` condition below,
 # or a later change to one will silently change the other.
 [ -s "$dir/combined.patch" ] || exit 0
