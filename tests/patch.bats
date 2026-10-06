@@ -290,3 +290,24 @@ setup_conflicted_repo() {
   run grep -q '^+pre-existing uncommitted change' "$D2/combined.patch"
   [ "$status" -ne 0 ]
 }
+
+@test "a superproject's submodule pointer moves are not shown" {
+  # A workspace repo whose members are submodules gets baselined when the session
+  # writes into it; commits made inside a member must not surface as pointer hunks.
+  SUB="$(cd "$(make_repo "$SCRATCH/sub")" && pwd -P)"
+  SUPER="$(cd "$(make_repo "$SCRATCH/super")" && pwd -P)"
+  git -C "$SUPER" -c protocol.file.allow=always submodule add -q "$SUB" member
+  git -C "$SUPER" commit -qm "add member"
+  st="$CLAUDE_PLUGIN_DATA/sessions/sm/state.json"
+  mkdir -p "$(dirname "$st")"
+  printf '{"repos":{},"agents":{}}' > "$st"
+  . "$HHR_ROOT/scripts/common.sh"
+  hhr_capture_repo_baseline "$st" "$SUPER"
+  printf 'agent work\n' >> "$SUPER/member/tracked.txt"
+  git -C "$SUPER/member" commit -qam "work in member"
+  printf 'workspace edit\n' >> "$SUPER/tracked.txt"
+  . "$HHR_ROOT/scripts/patch.sh"
+  hhr_build_patch "$(dirname "$st")"
+  grep -q 'workspace edit' "$(dirname "$st")/combined.patch"
+  ! grep -q 'Subproject commit' "$(dirname "$st")/combined.patch"
+}

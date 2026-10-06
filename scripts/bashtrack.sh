@@ -29,8 +29,9 @@ while IFS="$(printf '\t')" read -r root base dirty ufile; do
   # to commit, since a plain `git diff <base>` reads the working tree. On the
   # stash-create-failed fallback the snapshot is HEAD, which does not fold in the
   # pre-existing dirty paths, so those are subtracted here as patch.sh does.
+  # Submodule pointers are ignored for the same reason patch.sh ignores them.
   printf '%s' "$dirty" | jq -r '.[]?' 2>/dev/null > "$pend/$id.dirty" || : > "$pend/$id.dirty"
-  git -C "$root" diff --name-only "$base" 2>/dev/null | grep -vxF -f "$pend/$id.dirty" > "$pend/$id.files" || :
+  git -C "$root" diff --ignore-submodules=all --name-only "$base" 2>/dev/null | grep -vxF -f "$pend/$id.dirty" > "$pend/$id.files" || :
   # Untracked files that did not exist before the command ran.
   git -C "$root" ls-files --others --exclude-standard 2>/dev/null | sort \
     | comm -13 "$ufile" - >> "$pend/$id.files" 2>/dev/null || :

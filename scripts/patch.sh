@@ -35,6 +35,13 @@ hhr_build_patch() {
     # drift/unmerged paths. Exclude each one explicitly with git's own pathspec exclude
     # magic - EXCEPT a path the session went on to edit (agents[].files[], the same
     # $touched list used below for untracked files): that one must still appear.
+    # `--ignore-submodules=all`: a superproject (a workspace repo whose members are
+    # submodules) gets baselined the moment the session writes a spec or plan into it,
+    # and from then on every commit an agent makes inside a member checkout moves that
+    # submodule's HEAD and reads as a "Subproject commit" pointer change - one noise
+    # hunk per member, while the real code change lives elsewhere. A submodule the
+    # session edits is resolved to its own toplevel and tracked as its own repo, so
+    # its real changes still appear; only the pointer lines are dropped.
     # `:(exclude,literal)` (not plain `:(exclude)`) so a path containing glob
     # metacharacters (`[`, `*`, `?`) is matched literally, not as a pattern. Built via
     # POSIX `set --` (no arrays in `sh`), inside a subshell so it never leaks into the
@@ -49,7 +56,8 @@ hhr_build_patch() {
         grep -qxF "$root/$dp" "$touched" 2>/dev/null && continue
         set -- "$@" ":(exclude,literal)$dp"
       done < "$dirtylist"
-      git -C "$root" diff --src-prefix="a/$prefix/" --dst-prefix="b/$prefix/" "$base" -- "$@"
+      git -C "$root" diff --ignore-submodules=all \
+        --src-prefix="a/$prefix/" --dst-prefix="b/$prefix/" "$base" -- "$@"
     ) >> "$tmp" 2>/dev/null || true
 
     : > "$fileslist"
