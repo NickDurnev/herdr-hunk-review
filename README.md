@@ -45,13 +45,15 @@ change in a backend service and the worktree of a frontend sit side by side in o
 
 ## How it works
 
-Six hooks, each doing one small thing:
+Eight hooks, each doing one small thing:
 
 | Hook | Script | Does |
 |---|---|---|
 | `SessionStart` | `init.sh` | Creates the session's state directory before anything else can race on it. |
 | `PreToolUse` (`Edit\|Write\|NotebookEdit`) | `prebaseline.sh` | Snapshots each repo's pre-edit baseline the first time the session touches it. |
 | `PostToolUse` (`Edit\|Write\|NotebookEdit`) | `track.sh` | Records which agent touched which file, and which repo it lives in. |
+| `PreToolUse` (`Bash`) | `bashpre.sh` | Snapshots every repo the command might write to: the shell's cwd, `cd`/`-C` targets, absolute paths. |
+| `PostToolUse` (`Bash`) | `bashtrack.sh` | Compares against those snapshots; a repo the command actually changed is recorded like an Edit. |
 | `SubagentStop` | `note.sh` | Captures the subagent's closing report as that file's note, then refreshes. |
 | `Stop` | `refresh.sh` | Rebuilds the combined patch and sidecar, and makes sure the pane is showing them. |
 | `SessionEnd` | `cleanup.sh` | Closes the pane this session opened. |
@@ -60,6 +62,17 @@ The baseline snapshot runs on `PreToolUse`, not `PostToolUse`, on purpose: by th
 `PostToolUse` fires, the write has already landed, so a baseline taken there would
 already include the very edit it's supposed to exclude — the first change to every repo
 would silently vanish from the diff. Taking it before the write closes that gap.
+
+### Edits made through the shell
+
+Agents don't always edit with Edit/Write — `sed -i`, `cat > file` and `python3 - <<PY`
+scripts are common, especially for the main agent working inline. Those carry no file
+path the hooks can read, so the Bash pair guesses which repos a command could touch,
+snapshots them first, and compares them afterwards. Only a repo the command really
+changed gets recorded, so read-only commands (`git status`, test runs that write
+nothing) never add anything to the pane. A command that switches branches in a repo
+the session has not touched yet counts as a change too, and that repo's branch diff
+shows up — acknowledge it with `/herdr-hunk-review:hunk-baseline` if it's noise.
 
 ### Baselining a repo with an unresolved merge
 

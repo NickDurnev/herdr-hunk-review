@@ -158,15 +158,32 @@ hhr_capture_repo_baseline() {
   state="$1"
   root="$2"
   [ "$(jq -r --arg r "$root" '.repos[$r] // empty' "$state")" = "" ] || return 0
+  snap=$(hhr_snapshot_repo "$root") || return 0
+  hhr_record_repo_baseline "$state" "$root" "${snap%%	*}" "${snap#*	}"
+}
 
-  base=$(git -C "$root" stash create 2>/dev/null) || base=
+# Prints "<baseline-sha>\t<dirty-json>" for ROOT's current state, taken the way
+# hhr_capture_repo_baseline describes above. Split out so bashpre.sh can take the
+# snapshot BEFORE a Bash command runs and only record it (hhr_record_repo_baseline)
+# afterwards, once bashtrack.sh has seen that the command really changed the repo.
+hhr_snapshot_repo() {
+  base=$(git -C "$1" stash create 2>/dev/null) || base=
   if [ -n "$base" ]; then
     dirty='[]'
   else
-    base=$(git -C "$root" rev-parse HEAD 2>/dev/null) || base=
-    [ -n "$base" ] || return 0
-    dirty=$(hhr_dirty_paths_json "$root")
+    base=$(git -C "$1" rev-parse HEAD 2>/dev/null) || base=
+    [ -n "$base" ] || return 1
+    dirty=$(hhr_dirty_paths_json "$1")
   fi
+  printf '%s\t%s' "$base" "$dirty"
+}
+
+# Records BASE/DIRTY as ROOT's baseline with a de-duplicated prefix. Idempotent - a
+# no-op if STATE already has an entry for ROOT. Writes STATE in place; the caller must
+# hold the lock.
+hhr_record_repo_baseline() {
+  state="$1" root="$2" base="$3" dirty="${4:-[]}"
+  [ "$(jq -r --arg r "$root" '.repos[$r] // empty' "$state")" = "" ] || return 0
 
   prefix=$(basename "$root")
   n=2
@@ -178,6 +195,38 @@ hhr_capture_repo_baseline() {
   jq --arg r "$root" --arg b "$base" --arg p "$prefix" --argjson d "$dirty" \
      '.repos[$r] = ({baseline:$b, prefix:$p} + (if ($d | length) > 0 then {dirty_at_baseline:$d} else {} end))' \
      "$state" > "$state.tmp" && mv "$state.tmp" "$state"
+}
+
+# Repos a Bash command may write to, one physical toplevel per line, de-duplicated.
+# A Bash edit names no file the way Edit/Write do, so this guesses from three sources:
+# the shell's cwd (the persistent Bash cwd - the commonest case, `cd wt` in one call
+# and `python3 - <<PY` editing relative paths in the next), `cd <dir>` / `-C <dir>`
+# targets inside the command, and absolute-path-looking words anywhere in it. Wrong
+# guesses are harmless - bashtrack.sh only records a repo the command actually
+# changed - so this errs towards over-matching, capped at HHR_BASH_MAX_DIRS distinct
+# directories so a path-heavy command cannot stall the synchronous PreToolUse hook.
+: "${HHR_BASH_MAX_DIRS:=12}"
+hhr_bash_candidate_roots() {
+  cwd="$1" cmd="$2"
+  ws="$(printf ' \t')"
+  {
+    printf '%s\n' "$cwd"
+    printf '%s\n' "$cmd" | grep -oE "(^|[;&|(${ws}])cd[${ws}]+[^${ws};&|)]+" | sed -E "s/^.*cd[${ws}]+//"
+    printf '%s\n' "$cmd" | grep -oE -- "-C[${ws}]+[^${ws};&|)]+" | sed -E "s/^-C[${ws}]+//"
+    printf '%s\n' "$cmd" | grep -oE "(^|[${ws}'\"=(:])/[^${ws}'\";&|)<>]+" | sed -E "s/^[^/]//"
+  } 2>/dev/null | tr -d "'\"" | while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    case "$p" in
+      "~") p="$HOME" ;;
+      "~/"*) p="$HOME/${p#\~/}" ;;
+      /*) : ;;
+      *) [ -n "$cwd" ] || continue; p="$cwd/$p" ;;
+    esac
+    while [ ! -d "$p" ] && [ "$p" != "/" ] && [ -n "$p" ]; do p="$(dirname "$p")"; done
+    [ -d "$p" ] && [ "$p" != "/" ] && printf '%s\n' "$p"
+  done | awk '!seen[$0]++' | head -n "$HHR_BASH_MAX_DIRS" | while IFS= read -r d; do
+    git -C "$d" rev-parse --show-toplevel 2>/dev/null
+  done | awk '!seen[$0]++'
 }
 
 # Re-snapshot every tracked repo's baseline to its current working state, and clear
