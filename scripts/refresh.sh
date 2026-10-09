@@ -7,6 +7,7 @@
 # NOT override the separate empty-patch guard below: with nothing to show (every repo
 # at its baseline), no pane opens, forced or not.
 set -e
+: "${HHR_STALL_SECONDS:=10}"
 here="$(dirname "$0")"
 . "$here/common.sh"
 . "$here/patch.sh"
@@ -42,18 +43,6 @@ hhr_build_sidecar "$dir"
 # or a later change to one will silently change the other.
 [ -s "$dir/combined.patch" ] || exit 0
 
-if [ "$(jq -r '.watch_stalled // false' "$dir/state.json" 2>/dev/null)" = "true" ]; then
-  if [ -f "$dir/pane" ] && hhr_pane_alive "$(cat "$dir/pane")"; then
-    hhr_pane_restart "$dir"
-    exit 0
-  fi
-  # The pane the viewer used to live in is gone (the user closed it, or none ever
-  # opened). watch_stalled is write-once and there is nothing left to restart, so clear
-  # it and fall through to hhr_pane_ensure below - otherwise every future refresh keeps
-  # taking this branch and the viewer can never come back.
-  jq '.watch_stalled = false' "$dir/state.json" > "$dir/.s.tmp" && mv "$dir/.s.tmp" "$dir/state.json"
-fi
-
 # The shown.patch guard. This is the ONLY thing `force` bypasses: it clears
 # shown.patch so hhr_pane_ensure cannot read "pane gone AND content == shown.patch" and
 # treat the closed pane as acknowledged - by this point the empty-patch guard above has
@@ -61,13 +50,20 @@ fi
 [ "$force" = "force" ] && rm -f "$dir/shown.patch"
 hhr_pane_ensure "$dir"
 
-# Detect a watch that is not reloading: the live session should be no older than the patch.
+# Detect a watch that is not reloading: once hunk has had HHR_STALL_SECONDS to pick up
+# the current patch, its session should report a load no older than the patch. Judge
+# only a patch that old - this refresh usually rewrote the patch a moment ago, and hunk
+# cannot have reloaded it yet, so checking at once reads every quiet spell longer than
+# the threshold as a stall. That race used to restart hunk on almost every update,
+# flashing the shell and dropping the reviewer back to the top of the patch. Nothing
+# is persisted: a restart either fixes the watch or the next refresh judges it again.
 sid="$(hhr_session_id "$dir")"
 if [ -n "$sid" ]; then
   patch_mtime=$(hhr_patch_mtime "$dir")
+  now=$(date +%s)
   updated=$(hunk session list --json 2>/dev/null \
-            | jq -r --arg s "$sid" '.sessions[] | select(.sessionId == $s) | .snapshot.updatedAt // empty')
-  if [ -n "$updated" ]; then
+            | jq -r --arg s "$sid" '.sessions[] | select(.sessionId == $s) | .snapshot.updatedAt // .launchedAt // empty')
+  if [ -n "$updated" ] && [ $((now - patch_mtime)) -gt "$HHR_STALL_SECONDS" ]; then
     # updatedAt is ISO-8601 UTC (trailing Z). BSD `date -j -f` has no way to say "parse
     # this as UTC" other than running it with TZ=UTC, so without that the naive
     # wall-clock string gets reinterpreted in the local zone and the epoch comes out
@@ -75,8 +71,7 @@ if [ -n "$sid" ]; then
     # GNU `date -d` already understands the trailing Z and needs no such override.
     sess_epoch=$(TZ=UTC date -j -f "%Y-%m-%dT%H:%M:%S" "$(printf '%s' "$updated" | cut -d. -f1)" +%s 2>/dev/null \
                  || date -d "$updated" +%s 2>/dev/null || echo 0)
-    if [ "$sess_epoch" -gt 0 ] && [ $((patch_mtime - sess_epoch)) -gt 10 ]; then
-      jq '.watch_stalled = true' "$dir/state.json" > "$dir/.s.tmp" && mv "$dir/.s.tmp" "$dir/state.json"
+    if [ "$sess_epoch" -gt 0 ] && [ "$sess_epoch" -lt "$patch_mtime" ]; then
       hhr_pane_restart "$dir"
     fi
   fi

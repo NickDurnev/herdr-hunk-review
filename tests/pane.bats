@@ -89,6 +89,27 @@ src() { sh -c ". \"$HHR_ROOT/scripts/common.sh\"; . \"$HHR_ROOT/scripts/patch.sh
   [ -n "$q_line" ] && [ -n "$r_line" ] && [ "$q_line" -lt "$r_line" ]
 }
 
+@test "restart returns the new viewer to the file and hunk the reviewer was on" {
+  export HERDR_ENV=1
+  printf 'w1:p9' > "$DIR/pane"
+  # The old session answers context; once `pane run` relaunches, a new session id
+  # appears under the same sourceLabel.
+  cat > "$STUB/hunk" <<'EOF'
+#!/bin/sh
+echo "hunk $@" >> "$HERDR_STUB_LOG"
+sid=old
+grep -q 'pane run' "$HERDR_STUB_LOG" && sid=new
+case "$1 $2" in
+  "session list") printf '{"sessions":[{"sessionId":"%s","sourceLabel":"%s"}]}' "$sid" "$HHR_TEST_LABEL" ;;
+  "session context") printf '%s' '{"context":{"selectedFile":{"path":"repoA/src/app.py"},"selectedHunk":{"index":2}}}' ;;
+esac
+exit 0
+EOF
+  export HHR_TEST_LABEL="$DIR/combined.patch"
+  src "hhr_pane_restart '$DIR'"
+  grep -q 'hunk session navigate new --file repoA/src/app.py --hunk 3' "$HERDR_STUB_LOG"
+}
+
 @test "ensure opens no pane when hunk is not installed" {
   # The spec promises a missing hunk degrades to "a valid patch file any diff viewer
   # can open" — not to a pane running a command that does not exist.

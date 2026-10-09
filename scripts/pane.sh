@@ -103,14 +103,36 @@ hhr_pane_ensure() {
   return 0
 }
 
+# Restarting hunk loses the reviewer's place, so read the selected file and hunk from
+# the live session first and navigate the new session back to it. Best effort: a
+# viewer that already exited has no session to read, and a file that has since left
+# the patch cannot be navigated to - both just start at the top, as before.
 hhr_pane_restart() {
   dir="$1"
   [ -f "$dir/pane" ] || return 0
   pane=$(cat "$dir/pane")
+  old_sid="$(hhr_session_id "$dir")"
+  pos=
+  if [ -n "$old_sid" ]; then
+    pos=$(hunk session context "$old_sid" --json 2>/dev/null \
+          | jq -r '.context | select(.selectedFile.path != null)
+                   | "\(.selectedFile.path)\t\((.selectedHunk.index // 0) + 1)"' 2>/dev/null) || pos=
+  fi
   # pane run types into whatever occupies the pane, so the TUI must be quit first.
   herdr pane send-keys "$pane" q >/dev/null 2>&1 || true
   sleep 1
   herdr pane run "$pane" "$(hhr_viewer_cmd "$dir")" >/dev/null 2>&1 || true
+  [ -n "$pos" ] || return 0
+  tries=0
+  while [ "$tries" -lt 20 ]; do
+    sid="$(hhr_session_id "$dir")"
+    if [ -n "$sid" ] && [ "$sid" != "$old_sid" ]; then
+      hunk session navigate "$sid" --file "${pos%%	*}" --hunk "${pos#*	}" >/dev/null 2>&1 || true
+      return 0
+    fi
+    tries=$((tries + 1))
+    sleep 0.25
+  done
   return 0
 }
 

@@ -269,15 +269,15 @@ EOF
   [ ! -f "$DIR/.patch.tmp" ]
 }
 
-@test "marks watch_stalled when the session snapshot lags the patch" {
-  # A session that reports an ancient updatedAt must trigger the fallback exactly once.
+# Stubs a live viewer whose session last loaded at $1 (ISO-8601), in pane w1:p9.
+stub_live_viewer() {
   STUB="$SCRATCH/bin"; mkdir -p "$STUB"; export PATH="$STUB:$PATH"
   # cwd is deliberately NOT $DIR: the pane's cwd is now the project directory (see
   # hhr_pane_ensure), so the session lookup must match on sourceLabel instead.
   cat > "$STUB/hunk" <<EOF
 #!/bin/sh
 [ "\$1 \$2" = "session list" ] && cat <<'JSON'
-{"sessions":[{"sessionId":"sid1","cwd":"/private/tmp/elsewhere","sourceLabel":"$DIR/combined.patch","snapshot":{"updatedAt":"2000-01-01T00:00:00.000Z"}}]}
+{"sessions":[{"sessionId":"sid1","cwd":"/private/tmp/elsewhere","sourceLabel":"$DIR/combined.patch","snapshot":{"updatedAt":"$1"}}]}
 JSON
 exit 0
 EOF
@@ -294,35 +294,28 @@ EOF
   export HERDR_STUB_LOG="$SCRATCH/herdr.log"; : > "$HERDR_STUB_LOG"
   export HERDR_ENV=1
   printf 'w1:p9' > "$DIR/pane"
-  sh "$HHR_ROOT/scripts/refresh.sh" s1
-  jq -e '.watch_stalled == true' "$DIR/state.json"
+}
+
+@test "restarts the viewer when it never loaded a patch that is old enough" {
+  stub_live_viewer "2000-01-01T00:00:00.000Z"
+  # A negative threshold makes the just-written patch count as "old enough".
+  HHR_STALL_SECONDS=-1 sh "$HHR_ROOT/scripts/refresh.sh" s1
   grep -q 'send-keys' "$HERDR_STUB_LOG"
 }
 
-@test "watch_stalled is cleared and the pane recreated when the old pane is gone" {
-  # watch_stalled is write-once. If the user closes the pane after it stalls, restart
-  # (send-keys into a dead pane id) is a permanent no-op and the viewer can never come
-  # back - unless the flag is cleared so hhr_pane_ensure gets a chance to recreate it.
-  STUB="$SCRATCH/bin"; mkdir -p "$STUB"; export PATH="$STUB:$PATH"
-  printf '#!/bin/sh\nexit 0\n' > "$STUB/hunk"; chmod +x "$STUB/hunk"
-  cat > "$STUB/herdr" <<'EOF'
-#!/bin/sh
-echo "$@" >> "$HERDR_STUB_LOG"
-case "$1 $2" in
-  "pane list")   echo '{"result":{"panes":[]}}' ;;
-  "pane layout") echo '{"result":{"layout":{"area":{"width":120,"height":40}}}}' ;;
-  "pane split")  echo '{"result":{"pane":{"pane_id":"w1:p1"}}}' ;;
-  *) echo '{"result":{}}' ;;
-esac
-EOF
-  chmod +x "$STUB/herdr"
-  export HERDR_STUB_LOG="$SCRATCH/herdr.log"; : > "$HERDR_STUB_LOG"
-  export HERDR_ENV=1
-  jq '.watch_stalled = true' "$DIR/state.json" > "$DIR/t" && mv "$DIR/t" "$DIR/state.json"
-  # No $DIR/pane file: the pane the viewer used to live in is gone.
+@test "does not restart the viewer for a patch it has not had time to reload" {
+  # The race behind the scroll reset and shell flash: the patch was rewritten a moment
+  # ago, so a session that last loaded long before it is simply about to reload.
+  stub_live_viewer "2000-01-01T00:00:00.000Z"
   sh "$HHR_ROOT/scripts/refresh.sh" s1
-  [ "$(jq -r '.watch_stalled' "$DIR/state.json")" = "false" ]
-  grep -q 'pane split' "$HERDR_STUB_LOG"
+  run grep -q 'send-keys' "$HERDR_STUB_LOG"
+  [ "$status" -ne 0 ]
+}
+
+@test "a leftover watch_stalled flag no longer restarts the viewer on every refresh" {
+  stub_live_viewer "2999-01-01T00:00:00.000Z"
+  jq '.watch_stalled = true' "$DIR/state.json" > "$DIR/t" && mv "$DIR/t" "$DIR/state.json"
+  sh "$HHR_ROOT/scripts/refresh.sh" s1
   run grep -q 'send-keys' "$HERDR_STUB_LOG"
   [ "$status" -ne 0 ]
 }
