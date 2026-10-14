@@ -96,7 +96,22 @@ hhr_guard() {
   return 0
 }
 
+# Every caller that reads or writes state.json takes this lock first, so this is the one
+# place that can repair a corrupt state.json before anyone trips over it. A corrupt file
+# used to be permanent: every jq read failed, `set -e` killed every refresh, and no
+# writer could ever replace it. Keep the bad copy for diagnosis and start over - the
+# repos lose their baselines and are re-baselined on next touch, which beats a session
+# whose pane can never refresh again.
 hhr_lock() {
+  hhr_lock_acquire "$1" || return 1
+  if hhr_have jq && [ -f "$1/state.json" ] && ! jq empty "$1/state.json" >/dev/null 2>&1; then
+    mv "$1/state.json" "$1/state.json.corrupt.$(date +%s)" 2>/dev/null || true
+    printf '{"repos":{},"agents":{}}' > "$1/state.json"
+  fi
+  return 0
+}
+
+hhr_lock_acquire() {
   lock="$1/.lock"
   brk="$1/.lockbreak"
   attempts=0
@@ -194,7 +209,7 @@ hhr_record_repo_baseline() {
 
   jq --arg r "$root" --arg b "$base" --arg p "$prefix" --argjson d "$dirty" \
      '.repos[$r] = ({baseline:$b, prefix:$p} + (if ($d | length) > 0 then {dirty_at_baseline:$d} else {} end))' \
-     "$state" > "$state.tmp" && mv "$state.tmp" "$state"
+     "$state" > "$state.tmp.$$" && mv "$state.tmp.$$" "$state"
 }
 
 # Repos a Bash command may write to, one physical toplevel per line, de-duplicated.
@@ -228,6 +243,11 @@ hhr_bash_candidate_roots() {
     git -C "$d" rev-parse --show-toplevel 2>/dev/null
   done | awk '!seen[$0]++'
 }
+
+# Every write to state.json goes through "$state.tmp.$$", never a shared "$state.tmp":
+# the lock above is broken as stale after HHR_LOCK_STALE_SECONDS, and two writers that
+# shared one tmp name would interleave their bytes into it - which is how a state.json
+# with a stray fragment after its closing brace was once produced.
 
 # Re-snapshot every tracked repo's baseline to its current working state, and clear
 # stored agent notes - the shared core of "acknowledge everything shown so far".
@@ -266,9 +286,9 @@ hhr_reset_repo_baselines() {
        'if ($d | length) > 0
         then .repos[$r].baseline = $b | .repos[$r].dirty_at_baseline = $d
         else .repos[$r].baseline = $b | .repos[$r] |= del(.dirty_at_baseline) end' \
-       "$state" > "$state.tmp" && mv "$state.tmp" "$state"
+       "$state" > "$state.tmp.$$" && mv "$state.tmp.$$" "$state"
   done < "$reposlist"
   rm -f "$reposlist"
-  jq '.agents = {}' "$state" > "$state.tmp" && mv "$state.tmp" "$state"
+  jq '.agents = {}' "$state" > "$state.tmp.$$" && mv "$state.tmp.$$" "$state"
   return 0
 }

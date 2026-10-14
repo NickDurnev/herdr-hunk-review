@@ -43,7 +43,7 @@ hhr_capture_repo_baseline "$state" "$root"
 jq --arg a "$agent" --arg f "$file" \
    '.agents[$a] = (.agents[$a] // {type:"", output:"", files:[]})
     | .agents[$a].files = ((.agents[$a].files + [$f]) | unique)' \
-   "$state" > "$state.tmp" && mv "$state.tmp" "$state"
+   "$state" > "$state.tmp.$$" && mv "$state.tmp.$$" "$state"
 
 hhr_unlock "$dir"
 exit 0

@@ -77,7 +77,7 @@ if hhr_lock "$dir"; then
      '.agents[$a] = (.agents[$a] // {type:"", output:"", files:[]})
       | .agents[$a].type = $t
       | .agents[$a].output = $o
-      | .agents[$a].note_source = $s' "$state" > "$state.tmp" && mv "$state.tmp" "$state"
+      | .agents[$a].note_source = $s' "$state" > "$state.tmp.$$" && mv "$state.tmp.$$" "$state"
   hhr_unlock "$dir"
 fi
 

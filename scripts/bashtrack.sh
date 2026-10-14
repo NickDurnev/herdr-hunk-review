@@ -41,20 +41,26 @@ while IFS="$(printf '\t')" read -r root base dirty ufile; do
   done < "$pend/$id.files" >> "$changed"
 done < "$snaps"
 
+# One jq call for all the files, not one per file: a command that creates hundreds of
+# files (a cache directory written before its own .gitignore) used to hold the lock
+# for one jq rewrite of state.json per file - long enough for other hooks to break the
+# lock as stale and write state.json at the same time.
 if [ -s "$changed" ] && hhr_lock "$dir"; then
   state="$dir/state.json"
   [ -f "$state" ] || printf '{"repos":{},"agents":{}}' > "$state"
-  while IFS="$(printf '\t')" read -r root base dirty f; do
+  cut -f1-3 "$changed" | awk '!seen[$0]++' > "$pend/$id.repos"
+  while IFS="$(printf '\t')" read -r root base dirty; do
     hhr_record_repo_baseline "$state" "$root" "$base" "$dirty"
-    jq --arg a "$agent" --arg f "$f" \
-       '.agents[$a] = (.agents[$a] // {type:"", output:"", files:[]})
-        | .agents[$a].files = ((.agents[$a].files + [$f]) | unique)' \
-       "$state" > "$state.tmp" && mv "$state.tmp" "$state"
-  done < "$changed"
+  done < "$pend/$id.repos"
+  cut -f4 "$changed" > "$pend/$id.paths"
+  jq --arg a "$agent" --rawfile paths "$pend/$id.paths" \
+     '.agents[$a] = (.agents[$a] // {type:"", output:"", files:[]})
+      | .agents[$a].files = ((.agents[$a].files + ($paths | split("\n") | map(select(length > 0)))) | unique)' \
+     "$state" > "$state.tmp.$$" && mv "$state.tmp.$$" "$state"
   hhr_unlock "$dir"
 fi
 
 # Snapshot files are per call; remove them whether or not anything changed.
 while IFS="$(printf '\t')" read -r _ _ _ ufile; do rm -f "$ufile"; done < "$snaps"
-rm -f "$snaps" "$changed" "$pend/$id.files" "$pend/$id.dirty"
+rm -f "$snaps" "$changed" "$pend/$id.files" "$pend/$id.dirty" "$pend/$id.repos" "$pend/$id.paths"
 exit 0

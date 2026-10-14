@@ -27,6 +27,9 @@ cmd=$(printf '%s' "$payload" | jq -r '.tool_input.command // empty')
 # snapshot may land before this call's comparison has read its own.
 pend="$dir/bash"
 mkdir -p "$pend" || exit 0
+# A call whose PostToolUse never fires (a failed command, an interrupted one) leaves
+# its snapshot behind; sweep anything an hour old so the directory cannot grow forever.
+find "$pend" -type f -mmin +60 -exec rm -f {} + 2>/dev/null || :
 out="$pend/$id.tsv"
 : > "$out.tmp"
 n=0

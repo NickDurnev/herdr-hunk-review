@@ -99,3 +99,16 @@ run_bash() {
   st="$CLAUDE_PLUGIN_DATA/sessions/s11/state.json"
   [ ! -f "$st" ] || [ "$(jq -r '.repos | length' "$st")" -eq 0 ]
 }
+
+@test "a command that creates many files records them all in one write" {
+  run_bash s12 main t12 "$REPO" 'mkdir -p gen && for i in $(seq 1 200); do printf x > gen/f$i.txt; done'
+  st="$CLAUDE_PLUGIN_DATA/sessions/s12/state.json"
+  [ "$(jq -r '.agents.main.files | length' "$st")" -eq 200 ]
+}
+
+@test "snapshots left by a call whose PostToolUse never fired are swept" {
+  d="$CLAUDE_PLUGIN_DATA/sessions/s13/bash"; mkdir -p "$d"
+  printf 'x' > "$d/old.tsv"; touch -t 200001010000 "$d/old.tsv"
+  pre "$(bash_payload s13 main t13 "$REPO" 'true')"
+  [ ! -f "$d/old.tsv" ]
+}

@@ -125,3 +125,22 @@ teardown() { teardown_scratch; }
   [ "$status" -eq 0 ]
   [ -f "$d/payloads-unknown.jsonl" ]
 }
+
+@test "taking the lock replaces a corrupt state.json and keeps the bad copy" {
+  . "$HHR_ROOT/scripts/common.sh"
+  d="$SCRATCH/lockheal"; mkdir -p "$d"
+  printf '{"repos":{}}\n.data.json"\n' > "$d/state.json"
+  hhr_lock "$d"
+  hhr_unlock "$d"
+  [ "$(jq -c . "$d/state.json")" = '{"repos":{},"agents":{}}' ]
+  ls "$d"/state.json.corrupt.* >/dev/null
+}
+
+@test "taking the lock leaves a valid state.json alone" {
+  . "$HHR_ROOT/scripts/common.sh"
+  d="$SCRATCH/lockok"; mkdir -p "$d"
+  printf '{"repos":{"r":{}},"agents":{}}' > "$d/state.json"
+  hhr_lock "$d"
+  hhr_unlock "$d"
+  [ "$(jq -r '.repos | keys[0]' "$d/state.json")" = r ]
+}
